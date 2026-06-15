@@ -1,7 +1,10 @@
-from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 
+from sqlalchemy import Column, DateTime, Integer, String
+from sqlalchemy.orm import relationship
+
 from app.models.base import Base
+from app.models.file import FileMetadata
 
 
 class User(Base):
@@ -16,20 +19,9 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
-    
-from pydantic import BaseModel, EmailStr
 
-
-class UserRegister(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-
-
-class UserResponse(BaseModel):
-    id: int
-    username: str
-    email: EmailStr
-
-    class Config:
-        from_attributes = True
+    files = relationship(
+        FileMetadata,
+        back_populates="owner",
+        cascade="all, delete-orphan"
+    )

@@ -1,10 +1,22 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
-from app.database.dependencies import get_db
+from app.database.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.user import UserRegister, UserResponse
-from app.utils.security import hash_password
+from app.schemas.user import (
+    ProtectedRouteResponse,
+    TokenResponse,
+    UserRegister,
+    UserResponse
+)
+from app.services.auth_service import (
+    authenticate_user,
+    create_user,
+    create_user_access_token,
+    get_user_by_email,
+    get_user_by_username
+)
 
 router = APIRouter(
     prefix="/auth",
@@ -21,38 +33,68 @@ def register_user(
     db: Session = Depends(get_db)
 ):
 
-    existing_username = (
-        db.query(User)
-        .filter(User.username == user.username)
-        .first()
-    )
-
-    if existing_username:
+    if get_user_by_username(db, user.username):
         raise HTTPException(
             status_code=400,
             detail="Username already exists"
         )
 
-    existing_email = (
-        db.query(User)
-        .filter(User.email == user.email)
-        .first()
-    )
-
-    if existing_email:
+    if get_user_by_email(db, str(user.email)):
         raise HTTPException(
             status_code=400,
             detail="Email already exists"
         )
 
-    new_user = User(
-        username=user.username,
-        email=user.email,
-        password_hash=hash_password(user.password)
+    return create_user(db, user)
+
+
+@router.post(
+    "/login",
+    response_model=TokenResponse
+)
+def login_user(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    user = authenticate_user(
+        db,
+        form_data.username,
+        form_data.password
     )
 
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
 
-    return new_user
+    access_token = create_user_access_token(user)
+
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer"
+    )
+
+
+@router.get(
+    "/me",
+    response_model=UserResponse
+)
+def read_current_user(
+    current_user: User = Depends(get_current_user)
+):
+    return current_user
+
+
+@router.get(
+    "/protected",
+    response_model=ProtectedRouteResponse
+)
+def protected_route(
+    current_user: User = Depends(get_current_user)
+):
+    return ProtectedRouteResponse(
+        message="Authenticated request successful",
+        username=current_user.username
+    )
