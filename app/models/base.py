@@ -1,3 +1,11 @@
+from datetime import UTC, datetime
+
 from sqlalchemy.orm import DeclarativeBase
+
+
 class Base(DeclarativeBase):
-    pass 
+    pass
+
+
+def utc_now() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)

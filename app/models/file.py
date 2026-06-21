@@ -1,9 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import relationship
 
-from app.models.base import Base
+from app.models.base import Base, utc_now
 
 
 class FileMetadata(Base):
@@ -21,11 +19,11 @@ class FileMetadata(Base):
     content_type = Column(String(255), nullable=True)
     size_bytes = Column(BigInteger, nullable=False)
     encryption_metadata = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utc_now,
+        onupdate=utc_now,
         nullable=False
     )
 

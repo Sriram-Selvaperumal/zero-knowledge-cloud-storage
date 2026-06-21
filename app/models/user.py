@@ -1,9 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
 
-from app.models.base import Base
+from app.models.base import Base, utc_now
 from app.models.file import FileMetadata
 
 
@@ -18,7 +16,7 @@ class User(Base):
 
     password_hash = Column(String(255), nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     files = relationship(
         FileMetadata,
