@@ -2,6 +2,7 @@ from sqlalchemy import Column, DateTime, Integer, String
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, utc_now
+from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
 
 
@@ -22,4 +23,10 @@ class User(Base):
         FileMetadata,
         back_populates="owner",
         cascade="all, delete-orphan"
+    )
+    crypto_profile = relationship(
+        UserCryptoProfile,
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False
     )

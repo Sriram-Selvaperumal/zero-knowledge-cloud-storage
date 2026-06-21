@@ -1,3 +1,5 @@
+import base64
+import binascii
 import json
 import logging
 from pathlib import Path
@@ -5,11 +7,13 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import UploadFile
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.file import FileMetadata
 from app.models.user import User
+from app.schemas.file import EncryptionMetadataV1
 
 
 logger = logging.getLogger(__name__)
@@ -36,9 +40,11 @@ class InvalidFileMetadataError(FileStorageError):
 
 def parse_encryption_metadata(
     raw_metadata: str | None
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     if raw_metadata is None or not raw_metadata.strip():
-        return None
+        raise InvalidFileMetadataError(
+            "encryption_metadata is required"
+        )
 
     if len(raw_metadata) > MAX_ENCRYPTION_METADATA_LENGTH:
         raise InvalidFileMetadataError(
@@ -52,12 +58,14 @@ def parse_encryption_metadata(
             "encryption_metadata must be valid JSON"
         ) from exc
 
-    if not isinstance(metadata, dict):
+    try:
+        validated_metadata = EncryptionMetadataV1.model_validate(metadata)
+    except ValidationError as exc:
         raise InvalidFileMetadataError(
-            "encryption_metadata must be a JSON object"
-        )
+            "encryption_metadata does not match protocol version 1"
+        ) from exc
 
-    return metadata
+    return validated_metadata.model_dump()
 
 
 def _resolve_storage_path(storage_key: str) -> Path:
@@ -106,6 +114,21 @@ def save_uploaded_file(
     if len(encrypted_filename) > 1024:
         raise InvalidFileMetadataError(
             "encrypted_filename is too long"
+        )
+
+    try:
+        decoded_manifest = base64.b64decode(
+            encrypted_filename,
+            validate=True
+        )
+    except (ValueError, binascii.Error) as exc:
+        raise InvalidFileMetadataError(
+            "encrypted_filename must be valid standard base64"
+        ) from exc
+
+    if len(decoded_manifest) < 16:
+        raise InvalidFileMetadataError(
+            "encrypted_filename is too short"
         )
 
     content_type = upload.content_type

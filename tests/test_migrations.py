@@ -8,4 +8,6 @@ def test_migration_creates_expected_tables() -> None:
 
     assert "users" in table_names
     assert "file_metadata" in table_names
+    assert "user_crypto_profiles" in table_names
+    assert "registration_verifications" in table_names
     assert "alembic_version" in table_names

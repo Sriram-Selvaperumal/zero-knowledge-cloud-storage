@@ -1,8 +1,8 @@
-# Zero-Knowledge Cloud Storage API
+# Prototype
 
-FastAPI and PostgreSQL backend for authenticated encrypted-blob storage.
-The server stores ciphertext and encryption metadata; encryption and decryption
-belong on the client.
+Self-hosted zero-knowledge cloud storage prototype built with FastAPI,
+PostgreSQL, React, and client-side authenticated encryption. The server stores
+ciphertext, encrypted manifests, and wrapped keys only.
 
 ## Setup
 
@@ -14,6 +14,29 @@ Create a virtual environment, then install runtime and development packages:
 
 Copy `.env.example` to `.env` and provide separate development and test
 database URLs. The test database name must contain `test`.
+
+## Registration Email
+
+Registration creates no user until a six-digit email code is verified. Add a
+random `REGISTRATION_OTP_SECRET_KEY` and your SMTP settings to `.env`:
+
+```env
+SMTP_HOST=smtp.example.com
+SMTP_PORT=587
+SMTP_USERNAME=your-smtp-username
+SMTP_PASSWORD=your-smtp-password
+SMTP_FROM_EMAIL=no-reply@example.com
+SMTP_STARTTLS=true
+```
+
+Use an SMTP app password where your email provider supports one. Never commit
+real SMTP credentials. Codes expire after ten minutes, allow five attempts,
+and have a configurable resend cooldown.
+
+The registration API is a two-step flow:
+
+- `POST /auth/register/request-otp`
+- `POST /auth/register/verify`
 
 ## Database Migrations
 
@@ -52,3 +75,39 @@ separate PostgreSQL database whose name contains `test`, then run:
 ```
 
 Swagger documentation is available at `http://127.0.0.1:8000/docs`.
+
+## Run the Client
+
+Install and start the React client:
+
+```powershell
+cd frontend
+npm.cmd install
+npm.cmd run dev
+```
+
+The client is available at `http://127.0.0.1:5173`.
+
+## End-To-End Encryption Protocol
+
+Protocol version 1 uses:
+
+- Argon2id to derive a password-based key-encryption key.
+- A random 256-bit vault key wrapped by that derived key.
+- A random 256-bit key for every file.
+- XChaCha20-Poly1305 secret streams with 4 MiB plaintext chunks.
+- Authenticated wrapping for file keys and encrypted file manifests.
+- Client-generated file identifiers bound into authenticated data.
+
+Vault keys exist only in browser memory. The server stores the wrapped vault
+profile, encrypted file bytes, wrapped file keys, and versioned public
+encryption parameters. Losing the vault password makes encrypted files
+unrecoverable.
+
+Run frontend crypto tests and the production build with:
+
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run build
+```

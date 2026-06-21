@@ -2,8 +2,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.user import User
-from app.schemas.user import UserRegister
-from app.utils.security import create_access_token, hash_password, verify_password
+from app.utils.security import create_access_token, verify_password
 
 
 def get_user_by_username(db: Session, username: str) -> User | None:
@@ -33,20 +32,6 @@ def get_user_by_username_or_email(db: Session, identifier: str) -> User | None:
         )
         .first()
     )
-
-
-def create_user(db: Session, user: UserRegister) -> User:
-    new_user = User(
-        username=user.username,
-        email=str(user.email),
-        password_hash=hash_password(user.password)
-    )
-
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-
-    return new_user
 
 
 def authenticate_user(

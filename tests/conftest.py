@@ -51,14 +51,27 @@ test_storage_root = Path(tempfile.mkdtemp(prefix="cloud-storage-tests-"))
 
 os.environ["DATABASE_URL"] = test_database_url
 os.environ["JWT_SECRET_KEY"] = test_jwt_secret_key
+os.environ["REGISTRATION_OTP_SECRET_KEY"] = (
+    "test-only-registration-otp-secret-key"
+)
 os.environ["STORAGE_ROOT"] = str(test_storage_root)
 os.environ["MAX_UPLOAD_SIZE_BYTES"] = "64"
 
 from app.config import settings
 from app.database.database import SessionLocal
 from app.main import app
+from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
+from app.models.registration_verification import RegistrationVerification
 from app.models.user import User
+from app.services.email_service import get_email_sender
+
+
+delivered_registration_otps: dict[str, str] = {}
+
+
+def capture_registration_otp(recipient: str, otp: str) -> None:
+    delivered_registration_otps[recipient] = otp
 
 
 def clear_test_state() -> None:
@@ -66,6 +79,8 @@ def clear_test_state() -> None:
 
     try:
         db.query(FileMetadata).delete(synchronize_session=False)
+        db.query(UserCryptoProfile).delete(synchronize_session=False)
+        db.query(RegistrationVerification).delete(synchronize_session=False)
         db.query(User).delete(synchronize_session=False)
         db.commit()
     finally:
@@ -95,6 +110,22 @@ def isolated_test_state(
     clear_test_state()
 
 
+@pytest.fixture(autouse=True)
+def registration_email_sender() -> Generator[None, None, None]:
+    delivered_registration_otps.clear()
+    app.dependency_overrides[get_email_sender] = (
+        lambda: capture_registration_otp
+    )
+    yield
+    app.dependency_overrides.pop(get_email_sender, None)
+    delivered_registration_otps.clear()
+
+
+@pytest.fixture
+def sent_registration_otps() -> dict[str, str]:
+    return delivered_registration_otps
+
+
 @pytest.fixture
 def client() -> Generator[TestClient, None, None]:
     with TestClient(app) as test_client:
@@ -112,14 +143,25 @@ def create_authenticated_user(
         password = f"StrongPassword-{uuid4().hex}"
 
         register_response = client.post(
-            "/auth/register",
+            "/auth/register/request-otp",
             json={
                 "username": username,
                 "email": email,
                 "password": password
             }
         )
-        assert register_response.status_code == 200
+        assert register_response.status_code == 202
+
+        verification_response = client.post(
+            "/auth/register/verify",
+            json={
+                "verification_id": (
+                    register_response.json()["verification_id"]
+                ),
+                "otp": delivered_registration_otps[email]
+            }
+        )
+        assert verification_response.status_code == 201
 
         login_response = client.post(
             "/auth/login",
@@ -128,7 +170,7 @@ def create_authenticated_user(
         assert login_response.status_code == 200
 
         return {
-            "id": register_response.json()["id"],
+            "id": verification_response.json()["id"],
             "username": username,
             "email": email,
             "password": password,

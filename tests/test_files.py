@@ -1,3 +1,4 @@
+import base64
 import json
 from collections.abc import Callable
 
@@ -6,6 +7,25 @@ from fastapi.testclient import TestClient
 from app.config import settings
 from app.database.database import SessionLocal
 from app.models.file import FileMetadata
+
+
+ENCRYPTED_MANIFEST = base64.b64encode(bytes(range(32))).decode()
+
+
+def valid_encryption_metadata(plaintext_size: int = 32) -> dict:
+    return {
+        "version": 1,
+        "cipher": "xchacha20-poly1305-secretstream",
+        "file_id": base64.b64encode(bytes(range(16))).decode(),
+        "chunk_size": 4 * 1024 * 1024,
+        "plaintext_size": plaintext_size,
+        "stream_header": base64.b64encode(bytes(range(24))).decode(),
+        "wrapped_file_key": base64.b64encode(bytes(range(48))).decode(),
+        "wrapped_file_key_nonce": base64.b64encode(
+            bytes(range(24, 48))
+        ).decode(),
+        "manifest_nonce": base64.b64encode(bytes(range(48, 72))).decode()
+    }
 
 
 def auth_headers(user: dict[str, str | int]) -> dict[str, str]:
@@ -18,10 +38,13 @@ def upload_file(
     content: bytes,
     encryption_metadata: str | None = None
 ):
-    data = {"encrypted_filename": "encrypted-name-v1"}
+    data = {"encrypted_filename": ENCRYPTED_MANIFEST}
 
-    if encryption_metadata is not None:
-        data["encryption_metadata"] = encryption_metadata
+    data["encryption_metadata"] = (
+        encryption_metadata
+        if encryption_metadata is not None
+        else json.dumps(valid_encryption_metadata(len(content)))
+    )
 
     return client.post(
         "/files/upload",
@@ -43,7 +66,7 @@ def test_upload_list_download_and_delete(
 ) -> None:
     user = create_authenticated_user("files")
     ciphertext = bytes(range(32))
-    metadata = {"algorithm": "AES-256-GCM", "version": 1}
+    metadata = valid_encryption_metadata(len(ciphertext))
 
     upload_response = upload_file(
         client,
@@ -54,7 +77,7 @@ def test_upload_list_download_and_delete(
 
     assert upload_response.status_code == 201
     uploaded = upload_response.json()
-    assert uploaded["encrypted_filename"] == "encrypted-name-v1"
+    assert uploaded["encrypted_filename"] == ENCRYPTED_MANIFEST
     assert uploaded["size_bytes"] == len(ciphertext)
     assert uploaded["encryption_metadata"] == metadata
     assert "storage_key" not in uploaded
@@ -125,10 +148,23 @@ def test_upload_validation(
     empty_upload = upload_file(client, user, b"")
     oversized_upload = upload_file(client, user, bytes(range(65)))
     invalid_metadata = upload_file(client, user, b"content", "not-json")
+    missing_metadata = client.post(
+        "/files/upload",
+        headers=auth_headers(user),
+        files={
+            "file": (
+                "ciphertext.enc",
+                b"content",
+                "application/octet-stream"
+            )
+        },
+        data={"encrypted_filename": ENCRYPTED_MANIFEST}
+    )
 
     assert empty_upload.status_code == 400
     assert oversized_upload.status_code == 413
     assert invalid_metadata.status_code == 422
+    assert missing_metadata.status_code == 422
     assert client.get("/files", headers=auth_headers(user)).json() == []
 
 

@@ -35,6 +35,28 @@ def _get_path_env(name: str, default: str) -> Path:
     return path.resolve()
 
 
+def _get_list_env(name: str, default: str) -> list[str]:
+    value = os.getenv(name, default)
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _get_bool_env(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+
+    if value is None:
+        return default
+
+    normalized_value = value.strip().lower()
+
+    if normalized_value in {"1", "true", "yes", "on"}:
+        return True
+
+    if normalized_value in {"0", "false", "no", "off"}:
+        return False
+
+    raise RuntimeError(f"{name} must be a boolean")
+
+
 class Settings:
     database_url: str | None = os.getenv("DATABASE_URL")
     jwt_secret_key: str | None = os.getenv("JWT_SECRET_KEY")
@@ -47,6 +69,35 @@ class Settings:
     max_upload_size_bytes: int = _get_positive_int_env(
         "MAX_UPLOAD_SIZE_BYTES",
         100 * 1024 * 1024
+    )
+    cors_origins: list[str] = _get_list_env(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173"
+    )
+    registration_otp_secret_key: str | None = os.getenv(
+        "REGISTRATION_OTP_SECRET_KEY"
+    )
+    registration_otp_expire_minutes: int = _get_positive_int_env(
+        "REGISTRATION_OTP_EXPIRE_MINUTES",
+        10
+    )
+    registration_otp_max_attempts: int = _get_positive_int_env(
+        "REGISTRATION_OTP_MAX_ATTEMPTS",
+        5
+    )
+    registration_otp_resend_cooldown_seconds: int = _get_positive_int_env(
+        "REGISTRATION_OTP_RESEND_COOLDOWN_SECONDS",
+        60
+    )
+    smtp_host: str | None = os.getenv("SMTP_HOST")
+    smtp_port: int = _get_positive_int_env("SMTP_PORT", 587)
+    smtp_username: str | None = os.getenv("SMTP_USERNAME")
+    smtp_password: str | None = os.getenv("SMTP_PASSWORD")
+    smtp_from_email: str | None = os.getenv("SMTP_FROM_EMAIL")
+    smtp_starttls: bool = _get_bool_env("SMTP_STARTTLS", True)
+    smtp_timeout_seconds: int = _get_positive_int_env(
+        "SMTP_TIMEOUT_SECONDS",
+        10
     )
 
 

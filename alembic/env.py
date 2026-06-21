@@ -5,7 +5,9 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.models.base import Base
+from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
+from app.models.registration_verification import RegistrationVerification
 from app.models.user import User
 
 
