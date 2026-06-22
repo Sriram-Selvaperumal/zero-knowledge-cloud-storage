@@ -1,5 +1,5 @@
 import type { DecryptedFile, EncryptedFile } from "./crypto";
-import type { FileEncryptionMetadata } from "./types";
+import type { FileEncryptionMetadata, ShareUnlockResponse } from "./types";
 
 
 type WorkerResult = EncryptedFile | DecryptedFile;
@@ -85,6 +85,27 @@ export function decryptFileInWorker(
       encryptedFilename,
       metadata,
       vaultKey
+    },
+    "decrypted",
+    onProgress
+  );
+}
+
+
+export function decryptSharedFileInWorker(
+  ciphertext: Blob,
+  token: string,
+  sharedFile: ShareUnlockResponse,
+  shareKey: Uint8Array,
+  onProgress?: (progress: number) => void
+): Promise<DecryptedFile> {
+  return runWorker<DecryptedFile>(
+    {
+      type: "decrypt-share",
+      ciphertext,
+      token,
+      sharedFile,
+      vaultKey: shareKey
     },
     "decrypted",
     onProgress

@@ -34,7 +34,19 @@ class CryptoProfileBase(BaseModel):
         return ensure_base64(value)
 
 
-class CryptoProfileCreate(CryptoProfileBase):
+class RecoveryProfileBase(BaseModel):
+    recovery_version: Literal[1]
+    recovery_wrap_algorithm: Literal["xchacha20-poly1305-ietf"]
+    recovery_wrapped_vault_key: str = Field(min_length=32, max_length=512)
+    recovery_wrap_nonce: str = Field(min_length=16, max_length=128)
+
+    @field_validator("recovery_wrapped_vault_key", "recovery_wrap_nonce")
+    @classmethod
+    def validate_recovery_base64_fields(cls, value: str) -> str:
+        return ensure_base64(value)
+
+
+class CryptoProfileCreate(CryptoProfileBase, RecoveryProfileBase):
     pass
 
 
@@ -44,3 +56,22 @@ class CryptoProfileRewrap(CryptoProfileBase):
 
 class CryptoProfileResponse(CryptoProfileBase):
     model_config = ConfigDict(from_attributes=True)
+
+    recovery_version: Literal[1] | None
+    recovery_wrap_algorithm: Literal["xchacha20-poly1305-ietf"] | None
+    recovery_wrapped_vault_key: str | None
+    recovery_wrap_nonce: str | None
+
+    @field_validator("recovery_wrapped_vault_key", "recovery_wrap_nonce")
+    @classmethod
+    def validate_optional_recovery_base64(
+        cls,
+        value: str | None
+    ) -> str | None:
+        return ensure_base64(value) if value is not None else None
+
+
+class RecoveryProfileResponse(RecoveryProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: int

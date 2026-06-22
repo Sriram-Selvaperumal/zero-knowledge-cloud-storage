@@ -7,6 +7,7 @@ export interface User {
 export interface TokenResponse {
   access_token: string;
   token_type: "bearer";
+  expires_in_seconds: number;
 }
 
 export interface RegistrationOtpChallenge {
@@ -21,7 +22,7 @@ export interface KdfParameters {
   memlimit: number;
 }
 
-export interface CryptoProfile {
+export interface PasswordCryptoProfile {
   version: 1;
   kdf_algorithm: "argon2id";
   kdf_salt: string;
@@ -29,6 +30,28 @@ export interface CryptoProfile {
   wrap_algorithm: "xchacha20-poly1305-ietf";
   wrapped_vault_key: string;
   wrap_nonce: string;
+}
+
+export interface RecoveryProfile {
+  recovery_version: 1;
+  recovery_wrap_algorithm: "xchacha20-poly1305-ietf";
+  recovery_wrapped_vault_key: string;
+  recovery_wrap_nonce: string;
+}
+
+export interface CompleteCryptoProfile extends PasswordCryptoProfile, RecoveryProfile {}
+
+export interface CryptoProfile extends PasswordCryptoProfile {
+  recovery_version: 1 | null;
+  recovery_wrap_algorithm: "xchacha20-poly1305-ietf" | null;
+  recovery_wrapped_vault_key: string | null;
+  recovery_wrap_nonce: string | null;
+}
+
+export interface PasswordRecoveryGrant {
+  recovery_token: string;
+  user_id: number;
+  recovery_profile: RecoveryProfile;
 }
 
 export interface FileEncryptionMetadata {
@@ -60,4 +83,62 @@ export interface DecryptedManifest {
 
 export interface DisplayFile extends FileMetadata {
   manifest: DecryptedManifest | null;
+}
+
+export interface ShareCreatePayload {
+  token_hash: string;
+  version: 1;
+  kdf_algorithm: "argon2id";
+  kdf_salt: string;
+  kdf_parameters: KdfParameters;
+  wrap_algorithm: "xchacha20-poly1305-ietf";
+  wrapped_file_key: string;
+  wrap_nonce: string;
+  password_verifier: string;
+}
+
+export interface FileShare {
+  id: string;
+  file_id: number;
+  expires_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ShareAccessInfo {
+  id: string;
+  version: 1;
+  kdf_algorithm: "argon2id";
+  kdf_salt: string;
+  kdf_parameters: KdfParameters;
+  expires_at: string | null;
+}
+
+export interface SharedFileEncryptionMetadata {
+  version: 1;
+  cipher: "xchacha20-poly1305-secretstream";
+  file_id: string;
+  chunk_size: number;
+  plaintext_size: number;
+  stream_header: string;
+  manifest_nonce: string;
+}
+
+export interface ShareKeyEnvelope {
+  version: 1;
+  wrap_algorithm: "xchacha20-poly1305-ietf";
+  wrapped_file_key: string;
+  wrap_nonce: string;
+}
+
+export interface ShareUnlockResponse {
+  share_id: string;
+  encrypted_filename: string;
+  size_bytes: number;
+  encryption_metadata: SharedFileEncryptionMetadata;
+  share_envelope: ShareKeyEnvelope;
+  download_token: string;
+  download_expires_in_seconds: number;
+  expires_at: string | null;
 }

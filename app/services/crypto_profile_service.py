@@ -2,7 +2,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.crypto_profile import UserCryptoProfile
-from app.schemas.crypto import CryptoProfileBase
+from app.schemas.crypto import CryptoProfileBase, CryptoProfileCreate
 
 
 class CryptoProfileExistsError(Exception):
@@ -19,7 +19,7 @@ def get_crypto_profile(
 def create_crypto_profile(
     db: Session,
     user_id: int,
-    data: CryptoProfileBase
+    data: CryptoProfileCreate
 ) -> UserCryptoProfile:
     if get_crypto_profile(db, user_id) is not None:
         raise CryptoProfileExistsError
@@ -32,7 +32,11 @@ def create_crypto_profile(
         kdf_parameters=data.kdf_parameters.model_dump(),
         wrap_algorithm=data.wrap_algorithm,
         wrapped_vault_key=data.wrapped_vault_key,
-        wrap_nonce=data.wrap_nonce
+        wrap_nonce=data.wrap_nonce,
+        recovery_version=data.recovery_version,
+        recovery_wrap_algorithm=data.recovery_wrap_algorithm,
+        recovery_wrapped_vault_key=data.recovery_wrapped_vault_key,
+        recovery_wrap_nonce=data.recovery_wrap_nonce
     )
 
     try:

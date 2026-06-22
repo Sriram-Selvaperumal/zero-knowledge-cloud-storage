@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createPasswordProtectedShare,
   createVaultProfile,
   decryptFile,
   decryptManifest,
+  decryptSharedFile,
+  decryptSharedManifest,
+  deriveShareAccess,
   encryptFile,
+  rewrapVaultKey,
   unlockVault,
+  unlockVaultWithRecoveryKey,
   zeroKey
 } from "./crypto";
 
@@ -64,6 +70,43 @@ describe("client-side encryption protocol", () => {
     }
   });
 
+  it("recovers and rewraps the same vault key", async () => {
+    const setup = await createVaultProfile("old-password", 18);
+    const recoveredKey = await unlockVaultWithRecoveryKey(
+      setup.recoveryKey,
+      18,
+      setup.profile
+    );
+    const newProfile = await rewrapVaultKey(
+      "new-password",
+      18,
+      recoveredKey
+    );
+    const unlockedWithNewPassword = await unlockVault(
+      "new-password",
+      18,
+      { ...setup.profile, ...newProfile }
+    );
+
+    try {
+      expect(Array.from(recoveredKey)).toEqual(Array.from(setup.vaultKey));
+      expect(Array.from(unlockedWithNewPassword)).toEqual(
+        Array.from(setup.vaultKey)
+      );
+      await expect(
+        unlockVaultWithRecoveryKey(
+          `${setup.recoveryKey}damaged`,
+          18,
+          setup.profile
+        )
+      ).rejects.toThrow();
+    } finally {
+      await zeroKey(setup.vaultKey);
+      await zeroKey(recoveredKey);
+      await zeroKey(unlockedWithNewPassword);
+    }
+  });
+
   it("rejects modified ciphertext", async () => {
     const setup = await createVaultProfile("tamper-test-password", 9);
     const file = new File(
@@ -89,6 +132,97 @@ describe("client-side encryption protocol", () => {
       ).rejects.toThrow();
     } finally {
       await zeroKey(setup.vaultKey);
+    }
+  });
+
+  it("creates a password-protected share without exposing the vault key", async () => {
+    const setup = await createVaultProfile("vault-password", 27);
+    const plaintext = new TextEncoder().encode("shared secret content");
+    const file = new File([plaintext], "shared.txt", { type: "text/plain" });
+    let shareKey: Uint8Array | null = null;
+
+    try {
+      const encrypted = await encryptFile(file, setup.vaultKey);
+      const share = await createPasswordProtectedShare(
+        "strong-share-password",
+        encrypted.metadata,
+        setup.vaultKey
+      );
+      const accessInfo = {
+        id: "share-id",
+        version: share.payload.version,
+        kdf_algorithm: share.payload.kdf_algorithm,
+        kdf_salt: share.payload.kdf_salt,
+        kdf_parameters: share.payload.kdf_parameters,
+        expires_at: null
+      } as const;
+      const access = await deriveShareAccess(
+        "strong-share-password",
+        share.token,
+        accessInfo
+      );
+      shareKey = access.shareKey;
+      expect(access.passwordVerifier).toBe(share.payload.password_verifier);
+
+      const sharedFile = {
+        share_id: "share-id",
+        encrypted_filename: encrypted.encryptedFilename,
+        size_bytes: encrypted.ciphertext.size,
+        encryption_metadata: {
+          version: encrypted.metadata.version,
+          cipher: encrypted.metadata.cipher,
+          file_id: encrypted.metadata.file_id,
+          chunk_size: encrypted.metadata.chunk_size,
+          plaintext_size: encrypted.metadata.plaintext_size,
+          stream_header: encrypted.metadata.stream_header,
+          manifest_nonce: encrypted.metadata.manifest_nonce
+        },
+        share_envelope: {
+          version: share.payload.version,
+          wrap_algorithm: share.payload.wrap_algorithm,
+          wrapped_file_key: share.payload.wrapped_file_key,
+          wrap_nonce: share.payload.wrap_nonce
+        },
+        download_token: "test-grant",
+        download_expires_in_seconds: 300,
+        expires_at: null
+      } as const;
+      const manifest = await decryptSharedManifest(
+        share.token,
+        sharedFile,
+        shareKey
+      );
+      const decrypted = await decryptSharedFile(
+        encrypted.ciphertext,
+        share.token,
+        sharedFile,
+        shareKey
+      );
+
+      expect(manifest).toEqual({ name: "shared.txt", type: "text/plain" });
+      expect(decrypted.manifest).toEqual(manifest);
+      expect(new Uint8Array(await decrypted.content.arrayBuffer())).toEqual(
+        plaintext
+      );
+
+      const wrongAccess = await deriveShareAccess(
+        "incorrect-share-password",
+        share.token,
+        accessInfo
+      );
+      try {
+        expect(wrongAccess.passwordVerifier).not.toBe(
+          share.payload.password_verifier
+        );
+        await expect(
+          decryptSharedManifest(share.token, sharedFile, wrongAccess.shareKey)
+        ).rejects.toThrow();
+      } finally {
+        await zeroKey(wrongAccess.shareKey);
+      }
+    } finally {
+      await zeroKey(setup.vaultKey);
+      if (shareKey) await zeroKey(shareKey);
     }
   });
 });

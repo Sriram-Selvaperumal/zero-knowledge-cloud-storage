@@ -24,7 +24,7 @@ class SmtpHandler(socketserver.StreamRequestHandler):
                 if line == ".":
                     message = "\n".join(message_lines)
                     match = re.search(
-                        r"verification code is (\d{6})",
+                        r"(?:verification|password recovery) code is (\d{6})",
                         message,
                         re.IGNORECASE
                     )
@@ -71,7 +71,7 @@ class OtpHttpHandler(BaseHTTPRequestHandler):
         email = parse_qs(parsed_url.query).get("email", [""])[0].lower()
 
         with capture_lock:
-            otp = captured_otps.get(email)
+            otp = captured_otps.pop(email, None)
 
         if otp is None:
             self.send_error(404)

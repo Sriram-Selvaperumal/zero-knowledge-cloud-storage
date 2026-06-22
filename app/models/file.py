@@ -2,6 +2,7 @@ from sqlalchemy import BigInteger, Column, DateTime, ForeignKey, Integer, JSON, 
 from sqlalchemy.orm import relationship
 
 from app.models.base import Base, utc_now
+from app.models.file_share import FileShare
 
 
 class FileMetadata(Base):
@@ -28,3 +29,8 @@ class FileMetadata(Base):
     )
 
     owner = relationship("User", back_populates="files")
+    shares = relationship(
+        FileShare,
+        back_populates="file",
+        cascade="all, delete-orphan"
+    )

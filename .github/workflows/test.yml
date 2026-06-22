@@ -29,6 +29,8 @@ jobs:
       JWT_SECRET_KEY: ci-${{ github.run_id }}-${{ github.sha }}
       TEST_JWT_SECRET_KEY: test-${{ github.run_id }}-${{ github.sha }}
       REGISTRATION_OTP_SECRET_KEY: otp-${{ github.run_id }}-${{ github.sha }}
+      REFRESH_TOKEN_SECRET_KEY: refresh-${{ github.run_id }}-${{ github.sha }}
+      AUTH_THROTTLE_SECRET_KEY: throttle-${{ github.run_id }}-${{ github.sha }}
       MAX_UPLOAD_SIZE_BYTES: 64
 
     steps:
@@ -85,6 +87,7 @@ jobs:
           SMTP_HOST: 127.0.0.1
           SMTP_PORT: 8025
           SMTP_FROM_EMAIL: no-reply@example.com
+          SMTP_AUTH: false
           SMTP_STARTTLS: false
         run: |
           python tests/smtp_capture_server.py &

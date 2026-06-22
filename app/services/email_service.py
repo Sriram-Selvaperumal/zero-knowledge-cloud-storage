@@ -13,24 +13,33 @@ class EmailDeliveryError(Exception):
     pass
 
 
-def send_registration_otp(recipient: str, otp: str) -> None:
+def _send_otp_email(
+    recipient: str,
+    otp: str,
+    subject: str,
+    purpose: str,
+    expire_minutes: int
+) -> None:
     if not settings.smtp_host or not settings.smtp_from_email:
         raise EmailDeliveryError(
             "SMTP_HOST and SMTP_FROM_EMAIL must be configured"
         )
 
-    if bool(settings.smtp_username) != bool(settings.smtp_password):
+    if (
+        settings.smtp_auth
+        and bool(settings.smtp_username) != bool(settings.smtp_password)
+    ):
         raise EmailDeliveryError(
             "SMTP_USERNAME and SMTP_PASSWORD must be configured together"
         )
 
     message = EmailMessage()
-    message["Subject"] = "Your registration verification code"
+    message["Subject"] = subject
     message["From"] = settings.smtp_from_email
     message["To"] = recipient
     message.set_content(
-        f"Your verification code is {otp}.\n\n"
-        f"It expires in {settings.registration_otp_expire_minutes} minutes. "
+        f"Your {purpose} code is {otp}.\n\n"
+        f"It expires in {expire_minutes} minutes. "
         "If you did not request this code, you can ignore this email."
     )
 
@@ -46,7 +55,11 @@ def send_registration_otp(recipient: str, otp: str) -> None:
                 smtp.starttls(context=ssl.create_default_context())
                 smtp.ehlo()
 
-            if settings.smtp_username and settings.smtp_password:
+            if (
+                settings.smtp_auth
+                and settings.smtp_username
+                and settings.smtp_password
+            ):
                 smtp.login(settings.smtp_username, settings.smtp_password)
 
             smtp.send_message(message)
@@ -54,5 +67,29 @@ def send_registration_otp(recipient: str, otp: str) -> None:
         raise EmailDeliveryError("Unable to send verification email") from exc
 
 
+def send_registration_otp(recipient: str, otp: str) -> None:
+    _send_otp_email(
+        recipient=recipient,
+        otp=otp,
+        subject="Your registration verification code",
+        purpose="verification",
+        expire_minutes=settings.registration_otp_expire_minutes
+    )
+
+
+def send_password_recovery_otp(recipient: str, otp: str) -> None:
+    _send_otp_email(
+        recipient=recipient,
+        otp=otp,
+        subject="Your password recovery code",
+        purpose="password recovery",
+        expire_minutes=settings.password_recovery_otp_expire_minutes
+    )
+
+
 def get_email_sender() -> EmailSender:
     return send_registration_otp
+
+
+def get_password_recovery_email_sender() -> EmailSender:
+    return send_password_recovery_otp

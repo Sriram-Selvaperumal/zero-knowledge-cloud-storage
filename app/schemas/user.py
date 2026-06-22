@@ -27,6 +27,7 @@ class UserResponse(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+    expires_in_seconds: int
 
 
 class ProtectedRouteResponse(BaseModel):

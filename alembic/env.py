@@ -5,10 +5,14 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.models.base import Base
+from app.models.authentication_throttle import AuthenticationThrottle
 from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
+from app.models.file_share import FileShare
+from app.models.password_recovery import PasswordRecoveryVerification
 from app.models.registration_verification import RegistrationVerification
 from app.models.user import User
+from app.models.user_session import UserSession
 
 
 config = context.config

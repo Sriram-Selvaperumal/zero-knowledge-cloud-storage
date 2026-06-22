@@ -54,6 +54,12 @@ os.environ["JWT_SECRET_KEY"] = test_jwt_secret_key
 os.environ["REGISTRATION_OTP_SECRET_KEY"] = (
     "test-only-registration-otp-secret-key"
 )
+os.environ["REFRESH_TOKEN_SECRET_KEY"] = (
+    "test-only-refresh-token-secret-key"
+)
+os.environ["AUTH_THROTTLE_SECRET_KEY"] = (
+    "test-only-auth-throttle-secret-key"
+)
 os.environ["STORAGE_ROOT"] = str(test_storage_root)
 os.environ["MAX_UPLOAD_SIZE_BYTES"] = "64"
 
@@ -62,9 +68,16 @@ from app.database.database import SessionLocal
 from app.main import app
 from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
+from app.models.file_share import FileShare
+from app.models.authentication_throttle import AuthenticationThrottle
+from app.models.password_recovery import PasswordRecoveryVerification
 from app.models.registration_verification import RegistrationVerification
 from app.models.user import User
-from app.services.email_service import get_email_sender
+from app.models.user_session import UserSession
+from app.services.email_service import (
+    get_email_sender,
+    get_password_recovery_email_sender
+)
 
 
 delivered_registration_otps: dict[str, str] = {}
@@ -78,10 +91,16 @@ def clear_test_state() -> None:
     db = SessionLocal()
 
     try:
+        db.query(FileShare).delete(synchronize_session=False)
         db.query(FileMetadata).delete(synchronize_session=False)
         db.query(UserCryptoProfile).delete(synchronize_session=False)
+        db.query(UserSession).delete(synchronize_session=False)
+        db.query(PasswordRecoveryVerification).delete(
+            synchronize_session=False
+        )
         db.query(RegistrationVerification).delete(synchronize_session=False)
         db.query(User).delete(synchronize_session=False)
+        db.query(AuthenticationThrottle).delete(synchronize_session=False)
         db.commit()
     finally:
         db.close()
@@ -116,8 +135,12 @@ def registration_email_sender() -> Generator[None, None, None]:
     app.dependency_overrides[get_email_sender] = (
         lambda: capture_registration_otp
     )
+    app.dependency_overrides[get_password_recovery_email_sender] = (
+        lambda: capture_registration_otp
+    )
     yield
     app.dependency_overrides.pop(get_email_sender, None)
+    app.dependency_overrides.pop(get_password_recovery_email_sender, None)
     delivered_registration_otps.clear()
 
 

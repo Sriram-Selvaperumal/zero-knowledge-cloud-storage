@@ -4,7 +4,9 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 
 from app.database.database import SessionLocal
+from app.models.base import utc_now
 from app.models.user import User
+from app.models.user_session import UserSession
 from app.utils.security import decode_access_token
 
 
@@ -19,10 +21,10 @@ def get_db():
         db.close()
 
 
-def get_current_user(
+def get_current_session(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
-) -> User:
+) -> UserSession:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -32,21 +34,42 @@ def get_current_user(
     try:
         payload = decode_access_token(token)
         user_id = payload.get("sub")
+        session_id = payload.get("sid")
+        auth_version = payload.get("ver")
 
-        if user_id is None:
+        if (
+            user_id is None
+            or session_id is None
+            or auth_version is None
+        ):
             raise credentials_exception
 
         user_id = int(user_id)
-    except (JWTError, ValueError):
+        auth_version = int(auth_version)
+    except (JWTError, TypeError, ValueError):
         raise credentials_exception
 
-    user = (
-        db.query(User)
-        .filter(User.id == user_id)
+    user_session = (
+        db.query(UserSession)
+        .filter(
+            UserSession.id == session_id,
+            UserSession.user_id == user_id
+        )
         .first()
     )
 
-    if user is None:
+    if (
+        user_session is None
+        or user_session.revoked_at is not None
+        or user_session.expires_at <= utc_now()
+        or user_session.user.auth_version != auth_version
+    ):
         raise credentials_exception
 
-    return user
+    return user_session
+
+
+def get_current_user(
+    user_session: UserSession = Depends(get_current_session)
+) -> User:
+    return user_session.user

@@ -1,5 +1,5 @@
-import { decryptFile, encryptFile, zeroKey } from "./crypto";
-import type { FileEncryptionMetadata } from "./types";
+import { decryptFile, decryptSharedFile, encryptFile, zeroKey } from "./crypto";
+import type { FileEncryptionMetadata, ShareUnlockResponse } from "./types";
 
 
 type WorkerRequest =
@@ -15,6 +15,14 @@ type WorkerRequest =
       ciphertext: Blob;
       encryptedFilename: string;
       metadata: FileEncryptionMetadata;
+      vaultKey: Uint8Array;
+    }
+  | {
+      type: "decrypt-share";
+      requestId: string;
+      ciphertext: Blob;
+      token: string;
+      sharedFile: ShareUnlockResponse;
       vaultKey: Uint8Array;
     };
 
@@ -38,11 +46,28 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         requestId: request.requestId,
         result
       });
-    } else {
+    } else if (request.type === "decrypt") {
       const result = await decryptFile(
         request.ciphertext,
         request.encryptedFilename,
         request.metadata,
+        request.vaultKey,
+        (progress) => self.postMessage({
+          type: "progress",
+          requestId: request.requestId,
+          progress
+        })
+      );
+      self.postMessage({
+        type: "decrypted",
+        requestId: request.requestId,
+        result
+      });
+    } else {
+      const result = await decryptSharedFile(
+        request.ciphertext,
+        request.token,
+        request.sharedFile,
         request.vaultKey,
         (progress) => self.postMessage({
           type: "progress",
