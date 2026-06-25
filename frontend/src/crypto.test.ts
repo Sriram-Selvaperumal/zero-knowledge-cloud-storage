@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createVaultPasscodeEnvelope,
   createPasswordProtectedShare,
   createVaultProfile,
   decryptFile,
@@ -9,11 +10,21 @@ import {
   decryptSharedManifest,
   deriveShareAccess,
   encryptFile,
+  hasLocalVaultPasscode,
   rewrapVaultKey,
+  removeLocalVaultPasscode,
+  saveLocalVaultPasscode,
   unlockVault,
+  unlockVaultWithLocalPasscode,
+  unlockVaultWithPasscode,
   unlockVaultWithRecoveryKey,
   zeroKey
 } from "./crypto";
+
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 
 describe("client-side encryption protocol", () => {
@@ -67,6 +78,81 @@ describe("client-side encryption protocol", () => {
       ).rejects.toThrow();
     } finally {
       await zeroKey(setup.vaultKey);
+    }
+  });
+
+  it("wraps the vault key with a local files passcode", async () => {
+    const setup = await createVaultProfile("vault-password", 71);
+    const envelope = await createVaultPasscodeEnvelope(
+      "123456",
+      71,
+      setup.vaultKey,
+      6
+    );
+    const unlockedWithPasscode = await unlockVaultWithPasscode(
+      "123456",
+      71,
+      envelope
+    );
+
+    try {
+      expect(Array.from(unlockedWithPasscode)).toEqual(
+        Array.from(setup.vaultKey)
+      );
+      await expect(
+        unlockVaultWithPasscode("654321", 71, envelope)
+      ).rejects.toThrow();
+      await expect(
+        createVaultPasscodeEnvelope("12345", 71, setup.vaultKey, 6)
+      ).rejects.toThrow();
+    } finally {
+      await zeroKey(setup.vaultKey);
+      await zeroKey(unlockedWithPasscode);
+    }
+  });
+
+  it("stores and removes a local files passcode envelope", async () => {
+    const localStore = new Map<string, string>();
+    const localStorageMock = {
+      get length() {
+        return localStore.size;
+      },
+      clear: () => localStore.clear(),
+      getItem: (key: string) => localStore.get(key) ?? null,
+      key: (index: number) => Array.from(localStore.keys())[index] ?? null,
+      removeItem: (key: string) => {
+        localStore.delete(key);
+      },
+      setItem: (key: string, value: string) => {
+        localStore.set(key, value);
+      }
+    } as Storage;
+    vi.stubGlobal("localStorage", localStorageMock);
+
+    const setup = await createVaultProfile("vault-password", 72);
+    const envelope = await saveLocalVaultPasscode(
+      "1234",
+      72,
+      setup.vaultKey,
+      4
+    );
+    const unlockedWithPasscode = await unlockVaultWithLocalPasscode(
+      "1234",
+      72
+    );
+
+    try {
+      expect(envelope.wrapped_vault_key).not.toBe("");
+      expect(hasLocalVaultPasscode(72)).toBe(true);
+      expect(Array.from(unlockedWithPasscode)).toEqual(
+        Array.from(setup.vaultKey)
+      );
+
+      removeLocalVaultPasscode(72);
+      expect(hasLocalVaultPasscode(72)).toBe(false);
+    } finally {
+      await zeroKey(setup.vaultKey);
+      await zeroKey(unlockedWithPasscode);
     }
   });
 

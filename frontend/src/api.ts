@@ -16,11 +16,28 @@ import type {
 } from "./types";
 
 
+function getDefaultApiUrl(): string {
+  // In development the Vite proxy forwards /auth, /files and /shares to the
+  // backend, so all requests stay on the same origin and cookies work without
+  // any SameSite or CORS gymnastics.
+  if (import.meta.env.DEV) {
+    return "";
+  }
+
+  if (typeof window === "undefined" || !window.location.hostname) {
+    return "http://127.0.0.1:8000";
+  }
+
+  return `${window.location.protocol}//${window.location.hostname}:8000`;
+}
+
+
 const API_URL = (
-  import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000"
+  import.meta.env.VITE_API_URL ?? getDefaultApiUrl()
 ).replace(/\/$/, "");
 
 let accessTokenListener: ((token: string) => void) | null = null;
+let refreshSessionRequest: Promise<TokenResponse> | null = null;
 
 
 export function setAccessTokenListener(
@@ -133,7 +150,14 @@ export function login(
 
 
 export function refreshSession(): Promise<TokenResponse> {
-  return request<TokenResponse>("/auth/refresh", { method: "POST" });
+  refreshSessionRequest ??= request<TokenResponse>(
+    "/auth/refresh",
+    { method: "POST" }
+  ).finally(() => {
+    refreshSessionRequest = null;
+  });
+
+  return refreshSessionRequest;
 }
 
 

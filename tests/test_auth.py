@@ -3,6 +3,7 @@ from datetime import timedelta
 
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.database.database import SessionLocal
 from app.models.base import utc_now
 from app.models.registration_verification import RegistrationVerification
@@ -395,6 +396,35 @@ def test_refresh_logout_and_logout_all_revoke_sessions(
         "/auth/me",
         headers={"Authorization": f"Bearer {token}"}
     ).status_code == 401
+
+
+def test_immediate_duplicate_refresh_does_not_revoke_session(
+    client: TestClient,
+    create_authenticated_user
+) -> None:
+    user = create_authenticated_user("refresh-race")
+    original_refresh_cookie = client.cookies.get(settings.refresh_cookie_name)
+
+    assert original_refresh_cookie
+
+    refresh_response = client.post("/auth/refresh")
+    assert refresh_response.status_code == 200
+
+    duplicate_response = client.post(
+        "/auth/refresh",
+        headers={
+            "Cookie": (
+                f"{settings.refresh_cookie_name}={original_refresh_cookie}"
+            )
+        }
+    )
+    assert duplicate_response.status_code == 200
+
+    duplicate_token = duplicate_response.json()["access_token"]
+    assert client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {duplicate_token}"}
+    ).status_code == 200
 
 
 def test_password_change_rewraps_profile_and_revokes_other_sessions(

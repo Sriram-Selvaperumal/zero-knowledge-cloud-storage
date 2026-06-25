@@ -105,18 +105,32 @@ def rotate_refresh_token(
         raise InvalidRefreshTokenError("Refresh session is no longer valid")
 
     expected_hash = _hash_refresh_token(session_id, token_secret)
-
-    if not hmac.compare_digest(
+    matches_current_token = hmac.compare_digest(
         user_session.refresh_token_hash,
         expected_hash
-    ):
-        user_session.revoked_at = now
+    )
+    matches_grace_token = (
+        user_session.previous_refresh_token_hash is not None
+        and user_session.previous_refresh_token_expires_at is not None
+        and user_session.previous_refresh_token_expires_at >= now
+        and hmac.compare_digest(
+            user_session.previous_refresh_token_hash,
+            expected_hash
+        )
+    )
+
+    if not matches_current_token and not matches_grace_token:
         db.commit()
         raise InvalidRefreshTokenError("Invalid refresh token")
 
     user = user_session.user
+    previous_refresh_token_hash = user_session.refresh_token_hash
     refresh_token, refresh_token_hash = _new_refresh_token(session_id)
     user_session.refresh_token_hash = refresh_token_hash
+    user_session.previous_refresh_token_hash = previous_refresh_token_hash
+    user_session.previous_refresh_token_expires_at = now + timedelta(
+        seconds=settings.refresh_token_reuse_grace_seconds
+    )
     user_session.last_used_at = now
     db.commit()
 
@@ -144,6 +158,8 @@ def rotate_current_session_after_password_change(
 
     refresh_token, refresh_token_hash = _new_refresh_token(current_session.id)
     current_session.refresh_token_hash = refresh_token_hash
+    current_session.previous_refresh_token_hash = None
+    current_session.previous_refresh_token_expires_at = None
     current_session.last_used_at = now
     db.commit()
 

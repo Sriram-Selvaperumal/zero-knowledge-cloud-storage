@@ -72,6 +72,10 @@ class Settings:
         "REFRESH_TOKEN_EXPIRE_DAYS",
         30
     )
+    refresh_token_reuse_grace_seconds: int = _get_positive_int_env(
+        "REFRESH_TOKEN_REUSE_GRACE_SECONDS",
+        10
+    )
     refresh_cookie_name: str = os.getenv(
         "REFRESH_COOKIE_NAME",
         "prototype_refresh"

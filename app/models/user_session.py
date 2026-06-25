@@ -21,6 +21,8 @@ class UserSession(Base):
         index=True
     )
     refresh_token_hash = Column(String(64), nullable=False)
+    previous_refresh_token_hash = Column(String(64), nullable=True)
+    previous_refresh_token_expires_at = Column(DateTime(), nullable=True)
     expires_at = Column(DateTime(), nullable=False, index=True)
     revoked_at = Column(DateTime(), nullable=True, index=True)
     created_at = Column(DateTime(), default=utc_now, nullable=False)

@@ -166,10 +166,38 @@ button:disabled {
   gap: 16px;
 }
 
+.auth-loading {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  padding: 22px 0;
+  color: #536268;
+  font-weight: 700;
+}
+
 .auth-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
+}
+
+.restored-account {
+  display: grid;
+  gap: 3px;
+  padding: 12px;
+  border: 1px solid #d9e0e2;
+  border-radius: 7px;
+  background: #f7f9f9;
+}
+
+.restored-account strong {
+  color: #182126;
+  font-size: 14px;
+}
+
+.restored-account span {
+  color: #647277;
+  font-size: 13px;
 }
 
 .auth-form label {
@@ -182,7 +210,8 @@ button:disabled {
 
 .auth-form input,
 .auth-form textarea,
-.security-form input {
+.security-form input,
+.security-form select {
   width: 100%;
   min-height: 44px;
   padding: 0 12px;
@@ -202,7 +231,8 @@ button:disabled {
 
 .auth-form input:focus,
 .auth-form textarea:focus,
-.security-form input:focus {
+.security-form input:focus,
+.security-form select:focus {
   border-color: #0f766e;
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
@@ -330,6 +360,12 @@ button:disabled {
 .security-form {
   display: grid;
   gap: 14px;
+}
+
+.security-form + .security-form {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e7e9;
 }
 
 .security-form h3,
@@ -757,6 +793,25 @@ button:disabled {
   border: 1px solid #d7e0e2;
   border-radius: 7px;
   background: #ffffff;
+}
+
+.locked-workspace {
+  display: grid;
+  align-content: start;
+}
+
+.locked-vault-panel {
+  min-height: 290px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px solid #d7e0e2;
+  border-radius: 7px;
+  background: #ffffff;
+}
+
+.locked-vault-form {
+  width: min(100%, 430px);
 }
 
 .file-table {

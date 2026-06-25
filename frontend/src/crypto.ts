@@ -20,6 +20,8 @@ const FILE_ID_BYTES = 16;
 const VAULT_AAD_PREFIX = "cloud-storage:v1:vault:";
 const RECOVERY_AAD_PREFIX = "cloud-storage:v1:recovery:";
 const RECOVERY_KEY_PREFIX = "prototype-recovery-v1:";
+const PASSCODE_AAD_PREFIX = "cloud-storage:v1:passcode:";
+const PASSCODE_STORAGE_PREFIX = "prototype:vault-passcode:v1:";
 const FILE_KEY_AAD_PREFIX = "cloud-storage:v1:file-key:";
 const MANIFEST_AAD_PREFIX = "cloud-storage:v1:manifest:";
 const CHUNK_AAD_PREFIX = "cloud-storage:v1:chunk:";
@@ -60,6 +62,25 @@ export interface ShareAccess {
   passwordVerifier: string;
 }
 
+export type VaultPasscodeLength = 4 | 6 | 8;
+
+export interface VaultPasscodeEnvelope {
+  version: 1;
+  user_id: number;
+  digits: VaultPasscodeLength;
+  kdf_algorithm: "argon2id";
+  kdf_salt: string;
+  kdf_parameters: {
+    opslimit: number;
+    memlimit: number;
+  };
+  wrap_algorithm: "xchacha20-poly1305-ietf";
+  wrapped_vault_key: string;
+  wrap_nonce: string;
+  created_at: string;
+  updated_at: string;
+}
+
 
 async function ready(): Promise<void> {
   await sodium.ready;
@@ -83,6 +104,11 @@ function vaultAad(userId: number): string {
 
 function recoveryAad(userId: number): string {
   return `${RECOVERY_AAD_PREFIX}${userId}`;
+}
+
+
+function passcodeAad(userId: number): string {
+  return `${PASSCODE_AAD_PREFIX}${userId}`;
 }
 
 
@@ -142,6 +168,52 @@ function deriveKey(
 }
 
 
+function passcodeStorageKey(userId: number): string {
+  return `${PASSCODE_STORAGE_PREFIX}${userId}`;
+}
+
+
+function isVaultPasscodeLength(value: number): value is VaultPasscodeLength {
+  return value === 4 || value === 6 || value === 8;
+}
+
+
+function assertValidPasscode(
+  passcode: string,
+  digits?: VaultPasscodeLength
+): void {
+  const validLength = digits === undefined
+    ? passcode.length === 4 || passcode.length === 6 || passcode.length === 8
+    : passcode.length === digits;
+
+  if (!validLength || !/^\d+$/.test(passcode)) {
+    throw new Error("Passcode must be exactly 4, 6, or 8 digits");
+  }
+}
+
+
+function isPasscodeEnvelope(
+  value: unknown,
+  userId: number
+): value is VaultPasscodeEnvelope {
+  if (typeof value !== "object" || value === null) return false;
+
+  const envelope = value as Partial<VaultPasscodeEnvelope>;
+  return (
+    envelope.version === 1
+    && envelope.user_id === userId
+    && isVaultPasscodeLength(Number(envelope.digits))
+    && envelope.kdf_algorithm === "argon2id"
+    && typeof envelope.kdf_salt === "string"
+    && typeof envelope.kdf_parameters?.opslimit === "number"
+    && typeof envelope.kdf_parameters?.memlimit === "number"
+    && envelope.wrap_algorithm === "xchacha20-poly1305-ietf"
+    && typeof envelope.wrapped_vault_key === "string"
+    && typeof envelope.wrap_nonce === "string"
+  );
+}
+
+
 async function wrapVaultKey(
   password: string,
   userId: number,
@@ -178,6 +250,180 @@ async function wrapVaultKey(
   } finally {
     sodium.memzero(derivedKey);
   }
+}
+
+
+export async function createVaultPasscodeEnvelope(
+  passcode: string,
+  userId: number,
+  vaultKey: Uint8Array,
+  digits: VaultPasscodeLength
+): Promise<VaultPasscodeEnvelope> {
+  await ready();
+  assertValidPasscode(passcode, digits);
+
+  const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
+  const opslimit = sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE;
+  const memlimit = sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE;
+  const derivedKey = deriveKey(
+    `prototype-passcode-v1:${passcode}`,
+    salt,
+    opslimit,
+    memlimit
+  );
+  const nonce = sodium.randombytes_buf(
+    sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
+  );
+  const timestamp = new Date().toISOString();
+
+  try {
+    const wrappedVaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+      vaultKey,
+      passcodeAad(userId),
+      null,
+      nonce,
+      derivedKey
+    );
+
+    return {
+      version: 1,
+      user_id: userId,
+      digits,
+      kdf_algorithm: "argon2id",
+      kdf_salt: toBase64(salt),
+      kdf_parameters: { opslimit, memlimit },
+      wrap_algorithm: "xchacha20-poly1305-ietf",
+      wrapped_vault_key: toBase64(wrappedVaultKey),
+      wrap_nonce: toBase64(nonce),
+      created_at: timestamp,
+      updated_at: timestamp
+    };
+  } finally {
+    sodium.memzero(derivedKey);
+  }
+}
+
+
+export async function unlockVaultWithPasscode(
+  passcode: string,
+  userId: number,
+  envelope: VaultPasscodeEnvelope
+): Promise<Uint8Array> {
+  await ready();
+  assertValidPasscode(passcode, envelope.digits);
+
+  if (
+    envelope.version !== 1
+    || envelope.user_id !== userId
+    || envelope.kdf_algorithm !== "argon2id"
+    || envelope.wrap_algorithm !== "xchacha20-poly1305-ietf"
+    || envelope.kdf_parameters.opslimit < 1
+    || envelope.kdf_parameters.opslimit > 20
+    || envelope.kdf_parameters.memlimit < 8 * 1024 * 1024
+    || envelope.kdf_parameters.memlimit > 512 * 1024 * 1024
+  ) {
+    throw new Error("Unsupported passcode profile");
+  }
+
+  const derivedKey = deriveKey(
+    `prototype-passcode-v1:${passcode}`,
+    fromBase64(envelope.kdf_salt),
+    envelope.kdf_parameters.opslimit,
+    envelope.kdf_parameters.memlimit
+  );
+
+  try {
+    const vaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+      null,
+      fromBase64(envelope.wrapped_vault_key),
+      passcodeAad(userId),
+      fromBase64(envelope.wrap_nonce),
+      derivedKey
+    );
+
+    if (vaultKey.length !== VAULT_KEY_BYTES) {
+      throw new Error("Invalid vault key length");
+    }
+
+    return vaultKey;
+  } catch {
+    throw new Error("Passcode is incorrect or damaged");
+  } finally {
+    sodium.memzero(derivedKey);
+  }
+}
+
+
+export function loadLocalVaultPasscodeEnvelope(
+  userId: number
+): VaultPasscodeEnvelope | null {
+  if (typeof localStorage === "undefined") return null;
+
+  const rawEnvelope = localStorage.getItem(passcodeStorageKey(userId));
+  if (!rawEnvelope) return null;
+
+  try {
+    const envelope = JSON.parse(rawEnvelope) as unknown;
+    return isPasscodeEnvelope(envelope, userId) ? envelope : null;
+  } catch {
+    return null;
+  }
+}
+
+
+export function hasLocalVaultPasscode(userId: number): boolean {
+  return loadLocalVaultPasscodeEnvelope(userId) !== null;
+}
+
+
+export async function saveLocalVaultPasscode(
+  passcode: string,
+  userId: number,
+  vaultKey: Uint8Array,
+  digits: VaultPasscodeLength
+): Promise<VaultPasscodeEnvelope> {
+  if (typeof localStorage === "undefined") {
+    throw new Error("Local passcode storage is not available");
+  }
+
+  const existing = loadLocalVaultPasscodeEnvelope(userId);
+  const envelope = await createVaultPasscodeEnvelope(
+    passcode,
+    userId,
+    vaultKey,
+    digits
+  );
+  const envelopeToStore = {
+    ...envelope,
+    created_at: existing?.created_at ?? envelope.created_at
+  };
+
+  localStorage.setItem(
+    passcodeStorageKey(userId),
+    JSON.stringify(envelopeToStore)
+  );
+
+  return envelopeToStore;
+}
+
+
+export async function unlockVaultWithLocalPasscode(
+  passcode: string,
+  userId: number
+): Promise<Uint8Array> {
+  const envelope = loadLocalVaultPasscodeEnvelope(userId);
+
+  if (!envelope) {
+    throw new Error("No files passcode is set on this device");
+  }
+
+  return unlockVaultWithPasscode(passcode, userId, envelope);
+}
+
+
+export function removeLocalVaultPasscode(userId: number): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.removeItem(passcodeStorageKey(userId));
 }
 
 
