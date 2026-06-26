@@ -66,7 +66,7 @@ def test_create_unlock_download_list_and_revoke_share(
     expires_at = (utc_now() + timedelta(days=7)).isoformat() + "Z"
 
     create_response = client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=share_payload(token, verifier, expires_at)
     )
@@ -79,24 +79,24 @@ def test_create_unlock_download_list_and_revoke_share(
     assert "wrapped_file_key" not in created
 
     list_response = client.get(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner)
     )
     assert list_response.status_code == 200
     assert [share["id"] for share in list_response.json()] == [created["id"]]
 
-    inspect_response = client.get(f"/shares/{token}")
+    inspect_response = client.get(f"/api/shares/{token}")
     assert inspect_response.status_code == 200
     assert inspect_response.json()["kdf_algorithm"] == "argon2id"
     assert "password_verifier" not in inspect_response.json()
 
     assert client.post(
-        f"/shares/{token}/unlock",
+        f"/api/shares/{token}/unlock",
         json={"password_verifier": b64(32, 41)}
     ).status_code == 401
 
     unlock_response = client.post(
-        f"/shares/{token}/unlock",
+        f"/api/shares/{token}/unlock",
         json={"password_verifier": verifier}
     )
     assert unlock_response.status_code == 200
@@ -105,22 +105,22 @@ def test_create_unlock_download_list_and_revoke_share(
     assert "wrapped_file_key" not in unlocked["encryption_metadata"]
     assert unlocked["download_token"]
 
-    assert client.get(f"/shares/{token}/download").status_code == 401
+    assert client.get(f"/api/shares/{token}/download").status_code == 401
     download_response = client.get(
-        f"/shares/{token}/download",
+        f"/api/shares/{token}/download",
         headers={"Authorization": f"Share {unlocked['download_token']}"}
     )
     assert download_response.status_code == 200
     assert download_response.content == ciphertext
 
     revoke_response = client.delete(
-        f"/files/{file_id}/shares/{created['id']}",
+        f"/api/files/{file_id}/shares/{created['id']}",
         headers=auth_headers(owner)
     )
     assert revoke_response.status_code == 204
-    assert client.get(f"/shares/{token}").status_code == 410
+    assert client.get(f"/api/shares/{token}").status_code == 410
     assert client.get(
-        f"/shares/{token}/download",
+        f"/api/shares/{token}/download",
         headers={"Authorization": f"Share {unlocked['download_token']}"}
     ).status_code == 410
 
@@ -138,24 +138,24 @@ def test_share_ownership_expiration_and_file_delete_cascade(
     token = share_token("B")
     verifier = b64(32, 50)
     create_response = client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=share_payload(token, verifier)
     )
     share_id = create_response.json()["id"]
 
     assert client.get(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(other)
     ).status_code == 404
     assert client.delete(
-        f"/files/{file_id}/shares/{share_id}",
+        f"/api/files/{file_id}/shares/{share_id}",
         headers=auth_headers(other)
     ).status_code == 404
 
     past_expiry = (utc_now() - timedelta(minutes=1)).isoformat() + "Z"
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=share_payload(share_token("C"), verifier, past_expiry)
     ).status_code == 400
@@ -169,10 +169,10 @@ def test_share_ownership_expiration_and_file_delete_cascade(
     finally:
         db.close()
 
-    assert client.get(f"/shares/{token}").status_code == 410
+    assert client.get(f"/api/shares/{token}").status_code == 410
 
     assert client.delete(
-        f"/files/{file_id}",
+        f"/api/files/{file_id}",
         headers=auth_headers(owner)
     ).status_code == 204
 
@@ -195,7 +195,7 @@ def test_share_password_attempts_are_throttled(
     token = share_token("D")
     verifier = b64(32, 60)
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=share_payload(token, verifier)
     ).status_code == 201
@@ -204,20 +204,20 @@ def test_share_password_attempts_are_throttled(
 
     for _ in range(4):
         response = client.post(
-            f"/shares/{token}/unlock",
+            f"/api/shares/{token}/unlock",
             json={"password_verifier": wrong_verifier}
         )
         assert response.status_code == 401
 
     locked_response = client.post(
-        f"/shares/{token}/unlock",
+        f"/api/shares/{token}/unlock",
         json={"password_verifier": wrong_verifier}
     )
     assert locked_response.status_code == 429
     assert "Retry-After" in locked_response.headers
 
     correct_during_lockout = client.post(
-        f"/shares/{token}/unlock",
+        f"/api/shares/{token}/unlock",
         json={"password_verifier": verifier}
     )
     assert correct_during_lockout.status_code == 429
@@ -235,28 +235,28 @@ def test_share_routes_validate_authentication_and_payloads(
     token = share_token("E")
     verifier = b64(32, 70)
 
-    assert client.get(f"/files/{file_id}/shares").status_code == 401
+    assert client.get(f"/api/files/{file_id}/shares").status_code == 401
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         json=share_payload(token, verifier)
     ).status_code == 401
-    assert client.get(f"/shares/{share_token('Z')}").status_code == 404
+    assert client.get(f"/api/shares/{share_token('Z')}").status_code == 404
 
     duplicate_payload = share_payload(token, verifier)
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=duplicate_payload
     ).status_code == 201
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=duplicate_payload
     ).status_code == 409
 
     malformed = duplicate_payload | {"token_hash": "not-a-hash"}
     assert client.post(
-        f"/files/{file_id}/shares",
+        f"/api/files/{file_id}/shares",
         headers=auth_headers(owner),
         json=malformed
     ).status_code == 422

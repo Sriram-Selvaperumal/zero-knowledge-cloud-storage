@@ -57,7 +57,17 @@ def _get_bool_env(name: str, default: bool) -> bool:
     raise RuntimeError(f"{name} must be a boolean")
 
 
+def _get_path_prefix_env(name: str, default: str) -> str:
+    value = os.getenv(name, default).strip()
+
+    if not value:
+        return ""
+
+    return "/" + value.strip("/")
+
+
 class Settings:
+    api_prefix: str = _get_path_prefix_env("API_PREFIX", "/api")
     database_url: str | None = os.getenv("DATABASE_URL")
     jwt_secret_key: str | None = os.getenv("JWT_SECRET_KEY")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")

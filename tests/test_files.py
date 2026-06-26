@@ -47,7 +47,7 @@ def upload_file(
     )
 
     return client.post(
-        "/files/upload",
+        "/api/files/upload",
         headers=auth_headers(user),
         files={
             "file": (
@@ -94,24 +94,24 @@ def test_upload_list_download_and_delete(
 
     assert storage_path.read_bytes() == ciphertext
 
-    list_response = client.get("/files", headers=auth_headers(user))
+    list_response = client.get("/api/files", headers=auth_headers(user))
     assert list_response.status_code == 200
     assert [item["id"] for item in list_response.json()] == [uploaded["id"]]
 
     download_response = client.get(
-        f"/files/{uploaded['id']}/download",
+        f"/api/files/{uploaded['id']}/download",
         headers=auth_headers(user)
     )
     assert download_response.status_code == 200
     assert download_response.content == ciphertext
 
     delete_response = client.delete(
-        f"/files/{uploaded['id']}",
+        f"/api/files/{uploaded['id']}",
         headers=auth_headers(user)
     )
     assert delete_response.status_code == 204
     assert not storage_path.exists()
-    assert client.get("/files", headers=auth_headers(user)).json() == []
+    assert client.get("/api/files", headers=auth_headers(user)).json() == []
 
 
 def test_users_cannot_access_each_others_files(
@@ -123,13 +123,13 @@ def test_users_cannot_access_each_others_files(
     upload_response = upload_file(client, owner, b"encrypted content")
     file_id = upload_response.json()["id"]
 
-    other_list = client.get("/files", headers=auth_headers(other_user))
+    other_list = client.get("/api/files", headers=auth_headers(other_user))
     other_download = client.get(
-        f"/files/{file_id}/download",
+        f"/api/files/{file_id}/download",
         headers=auth_headers(other_user)
     )
     other_delete = client.delete(
-        f"/files/{file_id}",
+        f"/api/files/{file_id}",
         headers=auth_headers(other_user)
     )
 
@@ -149,7 +149,7 @@ def test_upload_validation(
     oversized_upload = upload_file(client, user, bytes(range(65)))
     invalid_metadata = upload_file(client, user, b"content", "not-json")
     missing_metadata = client.post(
-        "/files/upload",
+        "/api/files/upload",
         headers=auth_headers(user),
         files={
             "file": (
@@ -165,10 +165,10 @@ def test_upload_validation(
     assert oversized_upload.status_code == 413
     assert invalid_metadata.status_code == 422
     assert missing_metadata.status_code == 422
-    assert client.get("/files", headers=auth_headers(user)).json() == []
+    assert client.get("/api/files", headers=auth_headers(user)).json() == []
 
 
 def test_file_routes_require_authentication(client: TestClient) -> None:
-    assert client.get("/files").status_code == 401
-    assert client.get("/files/1/download").status_code == 401
-    assert client.delete("/files/1").status_code == 401
+    assert client.get("/api/files").status_code == 401
+    assert client.get("/api/files/1/download").status_code == 401
+    assert client.delete("/api/files/1").status_code == 401

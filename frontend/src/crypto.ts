@@ -20,8 +20,9 @@ const FILE_ID_BYTES = 16;
 const VAULT_AAD_PREFIX = "cloud-storage:v1:vault:";
 const RECOVERY_AAD_PREFIX = "cloud-storage:v1:recovery:";
 const RECOVERY_KEY_PREFIX = "prototype-recovery-v1:";
-const PASSCODE_AAD_PREFIX = "cloud-storage:v1:passcode:";
-const PASSCODE_STORAGE_PREFIX = "prototype:vault-passcode:v1:";
+const DEVICE_UNLOCK_AAD_PREFIX = "cloud-storage:v1:device-unlock:";
+const DEVICE_UNLOCK_STORAGE_PREFIX = "prototype:vault-device-unlock:v1:";
+const DEVICE_SECRET_STORAGE_PREFIX = "prototype:vault-device-secret:v1:";
 const FILE_KEY_AAD_PREFIX = "cloud-storage:v1:file-key:";
 const MANIFEST_AAD_PREFIX = "cloud-storage:v1:manifest:";
 const CHUNK_AAD_PREFIX = "cloud-storage:v1:chunk:";
@@ -62,18 +63,9 @@ export interface ShareAccess {
   passwordVerifier: string;
 }
 
-export type VaultPasscodeLength = 4 | 6 | 8;
-
-export interface VaultPasscodeEnvelope {
+export interface LocalDeviceVaultEnvelope {
   version: 1;
   user_id: number;
-  digits: VaultPasscodeLength;
-  kdf_algorithm: "argon2id";
-  kdf_salt: string;
-  kdf_parameters: {
-    opslimit: number;
-    memlimit: number;
-  };
   wrap_algorithm: "xchacha20-poly1305-ietf";
   wrapped_vault_key: string;
   wrap_nonce: string;
@@ -107,8 +99,8 @@ function recoveryAad(userId: number): string {
 }
 
 
-function passcodeAad(userId: number): string {
-  return `${PASSCODE_AAD_PREFIX}${userId}`;
+function deviceUnlockAad(userId: number): string {
+  return `${DEVICE_UNLOCK_AAD_PREFIX}${userId}`;
 }
 
 
@@ -168,49 +160,66 @@ function deriveKey(
 }
 
 
-function passcodeStorageKey(userId: number): string {
-  return `${PASSCODE_STORAGE_PREFIX}${userId}`;
+function deviceUnlockStorageKey(userId: number): string {
+  return `${DEVICE_UNLOCK_STORAGE_PREFIX}${userId}`;
 }
 
 
-function isVaultPasscodeLength(value: number): value is VaultPasscodeLength {
-  return value === 4 || value === 6 || value === 8;
+function deviceSecretStorageKey(userId: number): string {
+  return `${DEVICE_SECRET_STORAGE_PREFIX}${userId}`;
 }
 
 
-function assertValidPasscode(
-  passcode: string,
-  digits?: VaultPasscodeLength
-): void {
-  const validLength = digits === undefined
-    ? passcode.length === 4 || passcode.length === 6 || passcode.length === 8
-    : passcode.length === digits;
-
-  if (!validLength || !/^\d+$/.test(passcode)) {
-    throw new Error("Passcode must be exactly 4, 6, or 8 digits");
-  }
-}
-
-
-function isPasscodeEnvelope(
+function isLocalDeviceVaultEnvelope(
   value: unknown,
   userId: number
-): value is VaultPasscodeEnvelope {
+): value is LocalDeviceVaultEnvelope {
   if (typeof value !== "object" || value === null) return false;
 
-  const envelope = value as Partial<VaultPasscodeEnvelope>;
+  const envelope = value as Partial<LocalDeviceVaultEnvelope>;
   return (
     envelope.version === 1
     && envelope.user_id === userId
-    && isVaultPasscodeLength(Number(envelope.digits))
-    && envelope.kdf_algorithm === "argon2id"
-    && typeof envelope.kdf_salt === "string"
-    && typeof envelope.kdf_parameters?.opslimit === "number"
-    && typeof envelope.kdf_parameters?.memlimit === "number"
     && envelope.wrap_algorithm === "xchacha20-poly1305-ietf"
     && typeof envelope.wrapped_vault_key === "string"
     && typeof envelope.wrap_nonce === "string"
   );
+}
+
+
+function loadLocalDeviceSecret(userId: number): Uint8Array | null {
+  if (typeof localStorage === "undefined") return null;
+
+  const encodedSecret = localStorage.getItem(deviceSecretStorageKey(userId));
+  if (!encodedSecret) return null;
+
+  try {
+    const secret = fromBase64(encodedSecret);
+    return secret.length === VAULT_KEY_BYTES ? secret : null;
+  } catch {
+    return null;
+  }
+}
+
+
+function hasLocalDeviceSecret(userId: number): boolean {
+  if (typeof localStorage === "undefined") return false;
+  return localStorage.getItem(deviceSecretStorageKey(userId)) !== null;
+}
+
+
+function getOrCreateLocalDeviceSecret(userId: number): Uint8Array {
+  if (typeof localStorage === "undefined") {
+    throw new Error("Local device storage is not available");
+  }
+
+  const existingSecret = loadLocalDeviceSecret(userId);
+  if (existingSecret) return existingSecret;
+
+  const secret = sodium.randombytes_buf(VAULT_KEY_BYTES);
+  localStorage.setItem(deviceSecretStorageKey(userId), toBase64(secret));
+
+  return secret;
 }
 
 
@@ -253,24 +262,13 @@ async function wrapVaultKey(
 }
 
 
-export async function createVaultPasscodeEnvelope(
-  passcode: string,
+export async function createLocalDeviceVaultEnvelope(
   userId: number,
-  vaultKey: Uint8Array,
-  digits: VaultPasscodeLength
-): Promise<VaultPasscodeEnvelope> {
+  vaultKey: Uint8Array
+): Promise<LocalDeviceVaultEnvelope> {
   await ready();
-  assertValidPasscode(passcode, digits);
 
-  const salt = sodium.randombytes_buf(sodium.crypto_pwhash_SALTBYTES);
-  const opslimit = sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE;
-  const memlimit = sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE;
-  const derivedKey = deriveKey(
-    `prototype-passcode-v1:${passcode}`,
-    salt,
-    opslimit,
-    memlimit
-  );
+  const deviceSecret = getOrCreateLocalDeviceSecret(userId);
   const nonce = sodium.randombytes_buf(
     sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
   );
@@ -279,19 +277,15 @@ export async function createVaultPasscodeEnvelope(
   try {
     const wrappedVaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
       vaultKey,
-      passcodeAad(userId),
+      deviceUnlockAad(userId),
       null,
       nonce,
-      derivedKey
+      deviceSecret
     );
 
     return {
       version: 1,
       user_id: userId,
-      digits,
-      kdf_algorithm: "argon2id",
-      kdf_salt: toBase64(salt),
-      kdf_parameters: { opslimit, memlimit },
       wrap_algorithm: "xchacha20-poly1305-ietf",
       wrapped_vault_key: toBase64(wrappedVaultKey),
       wrap_nonce: toBase64(nonce),
@@ -299,46 +293,40 @@ export async function createVaultPasscodeEnvelope(
       updated_at: timestamp
     };
   } finally {
-    sodium.memzero(derivedKey);
+    sodium.memzero(deviceSecret);
   }
 }
 
 
-export async function unlockVaultWithPasscode(
-  passcode: string,
+export async function unlockVaultWithLocalDevice(
   userId: number,
-  envelope: VaultPasscodeEnvelope
+  envelope?: LocalDeviceVaultEnvelope | null
 ): Promise<Uint8Array> {
   await ready();
-  assertValidPasscode(passcode, envelope.digits);
 
-  if (
-    envelope.version !== 1
-    || envelope.user_id !== userId
-    || envelope.kdf_algorithm !== "argon2id"
-    || envelope.wrap_algorithm !== "xchacha20-poly1305-ietf"
-    || envelope.kdf_parameters.opslimit < 1
-    || envelope.kdf_parameters.opslimit > 20
-    || envelope.kdf_parameters.memlimit < 8 * 1024 * 1024
-    || envelope.kdf_parameters.memlimit > 512 * 1024 * 1024
-  ) {
-    throw new Error("Unsupported passcode profile");
+  const activeEnvelope = envelope ?? loadLocalDeviceVaultEnvelope(userId);
+  const deviceSecret = loadLocalDeviceSecret(userId);
+
+  if (!activeEnvelope || !deviceSecret) {
+    throw new Error("This device is not trusted for automatic file unlock");
   }
 
-  const derivedKey = deriveKey(
-    `prototype-passcode-v1:${passcode}`,
-    fromBase64(envelope.kdf_salt),
-    envelope.kdf_parameters.opslimit,
-    envelope.kdf_parameters.memlimit
-  );
+  if (
+    activeEnvelope.version !== 1
+    || activeEnvelope.user_id !== userId
+    || activeEnvelope.wrap_algorithm !== "xchacha20-poly1305-ietf"
+  ) {
+    sodium.memzero(deviceSecret);
+    throw new Error("Unsupported device unlock profile");
+  }
 
   try {
     const vaultKey = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
       null,
-      fromBase64(envelope.wrapped_vault_key),
-      passcodeAad(userId),
-      fromBase64(envelope.wrap_nonce),
-      derivedKey
+      fromBase64(activeEnvelope.wrapped_vault_key),
+      deviceUnlockAad(userId),
+      fromBase64(activeEnvelope.wrap_nonce),
+      deviceSecret
     );
 
     if (vaultKey.length !== VAULT_KEY_BYTES) {
@@ -347,51 +335,50 @@ export async function unlockVaultWithPasscode(
 
     return vaultKey;
   } catch {
-    throw new Error("Passcode is incorrect or damaged");
+    throw new Error("Device unlock data is incorrect or damaged");
   } finally {
-    sodium.memzero(derivedKey);
+    sodium.memzero(deviceSecret);
   }
 }
 
 
-export function loadLocalVaultPasscodeEnvelope(
+export function loadLocalDeviceVaultEnvelope(
   userId: number
-): VaultPasscodeEnvelope | null {
+): LocalDeviceVaultEnvelope | null {
   if (typeof localStorage === "undefined") return null;
 
-  const rawEnvelope = localStorage.getItem(passcodeStorageKey(userId));
+  const rawEnvelope = localStorage.getItem(deviceUnlockStorageKey(userId));
   if (!rawEnvelope) return null;
 
   try {
     const envelope = JSON.parse(rawEnvelope) as unknown;
-    return isPasscodeEnvelope(envelope, userId) ? envelope : null;
+    return isLocalDeviceVaultEnvelope(envelope, userId) ? envelope : null;
   } catch {
     return null;
   }
 }
 
 
-export function hasLocalVaultPasscode(userId: number): boolean {
-  return loadLocalVaultPasscodeEnvelope(userId) !== null;
+export function hasLocalDeviceVault(userId: number): boolean {
+  return (
+    loadLocalDeviceVaultEnvelope(userId) !== null
+    && hasLocalDeviceSecret(userId)
+  );
 }
 
 
-export async function saveLocalVaultPasscode(
-  passcode: string,
+export async function saveLocalDeviceVault(
   userId: number,
-  vaultKey: Uint8Array,
-  digits: VaultPasscodeLength
-): Promise<VaultPasscodeEnvelope> {
+  vaultKey: Uint8Array
+): Promise<LocalDeviceVaultEnvelope> {
   if (typeof localStorage === "undefined") {
-    throw new Error("Local passcode storage is not available");
+    throw new Error("Local device storage is not available");
   }
 
-  const existing = loadLocalVaultPasscodeEnvelope(userId);
-  const envelope = await createVaultPasscodeEnvelope(
-    passcode,
+  const existing = loadLocalDeviceVaultEnvelope(userId);
+  const envelope = await createLocalDeviceVaultEnvelope(
     userId,
-    vaultKey,
-    digits
+    vaultKey
   );
   const envelopeToStore = {
     ...envelope,
@@ -399,7 +386,7 @@ export async function saveLocalVaultPasscode(
   };
 
   localStorage.setItem(
-    passcodeStorageKey(userId),
+    deviceUnlockStorageKey(userId),
     JSON.stringify(envelopeToStore)
   );
 
@@ -407,23 +394,10 @@ export async function saveLocalVaultPasscode(
 }
 
 
-export async function unlockVaultWithLocalPasscode(
-  passcode: string,
-  userId: number
-): Promise<Uint8Array> {
-  const envelope = loadLocalVaultPasscodeEnvelope(userId);
-
-  if (!envelope) {
-    throw new Error("No files passcode is set on this device");
-  }
-
-  return unlockVaultWithPasscode(passcode, userId, envelope);
-}
-
-
-export function removeLocalVaultPasscode(userId: number): void {
+export function removeLocalDeviceVault(userId: number): void {
   if (typeof localStorage === "undefined") return;
-  localStorage.removeItem(passcodeStorageKey(userId));
+  localStorage.removeItem(deviceUnlockStorageKey(userId));
+  localStorage.removeItem(deviceSecretStorageKey(userId));
 }
 
 

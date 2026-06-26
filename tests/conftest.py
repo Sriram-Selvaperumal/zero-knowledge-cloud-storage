@@ -166,7 +166,7 @@ def create_authenticated_user(
         password = f"StrongPassword-{uuid4().hex}"
 
         register_response = client.post(
-            "/auth/register/request-otp",
+            "/api/auth/register/request-otp",
             json={
                 "username": username,
                 "email": email,
@@ -176,7 +176,7 @@ def create_authenticated_user(
         assert register_response.status_code == 202
 
         verification_response = client.post(
-            "/auth/register/verify",
+            "/api/auth/register/verify",
             json={
                 "verification_id": (
                     register_response.json()["verification_id"]
@@ -187,7 +187,7 @@ def create_authenticated_user(
         assert verification_response.status_code == 201
 
         login_response = client.post(
-            "/auth/login",
+            "/api/auth/login",
             data={"username": username, "password": password}
         )
         assert login_response.status_code == 200

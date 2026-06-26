@@ -373,6 +373,13 @@ button:disabled {
   font-size: 15px;
 }
 
+.security-section p {
+  margin: 4px 0 0;
+  color: #647278;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .security-form label {
   display: grid;
   gap: 7px;

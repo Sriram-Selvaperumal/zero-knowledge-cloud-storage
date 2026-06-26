@@ -73,7 +73,7 @@ import type {
   ShareUnlockResponse,
   User
 } from "./types";
-import type { ShareAccess, VaultPasscodeLength } from "./crypto";
+import type { ShareAccess } from "./crypto";
 
 
 interface Session {
@@ -112,6 +112,7 @@ type RecoveryStage = "request" | "otp" | "complete";
 type VaultRoute = "auth" | "files";
 
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const MANUAL_LOCK_STORAGE_KEY = "prototype:manual-file-lock";
 
 
 function formatBytes(bytes: number): string {
@@ -223,10 +224,7 @@ function VaultApp() {
   const [session, setSession] = useState<Session | null>(null);
   const [restoredAuth, setRestoredAuth] = useState<RestoredAuth | null>(null);
   const [checkingStoredSession, setCheckingStoredSession] = useState(true);
-  const [passcodeAvailable, setPasscodeAvailable] = useState(false);
-  const [unlockMethod, setUnlockMethod] = useState<"passcode" | "password">(
-    "password"
-  );
+  const [deviceUnlockAvailable, setDeviceUnlockAvailable] = useState(false);
   const [files, setFiles] = useState<DisplayFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
@@ -357,19 +355,51 @@ function VaultApp() {
       try {
         const tokenResponse = await refreshSession();
         const user = await getCurrentUser(tokenResponse.access_token);
-        const { hasLocalVaultPasscode } = await import("./crypto");
+        const {
+          hasLocalDeviceVault,
+          unlockVaultWithLocalDevice
+        } = await import("./crypto");
 
         if (cancelled) return;
+
+        const shouldAutoUnlockFiles = (
+          getVaultRouteFromLocation() === "files"
+          && sessionStorage.getItem(MANUAL_LOCK_STORAGE_KEY) !== "1"
+        );
+
+        if (shouldAutoUnlockFiles && hasLocalDeviceVault(user.id)) {
+          try {
+            const vaultKey = await unlockVaultWithLocalDevice(user.id);
+
+            if (cancelled) {
+              const { zeroKey } = await import("./crypto");
+              await zeroKey(vaultKey);
+              return;
+            }
+
+            sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
+            setSession({
+              token: tokenResponse.access_token,
+              user,
+              vaultKey
+            });
+            setRestoredAuth(null);
+            setDeviceUnlockAvailable(true);
+            return;
+          } catch {
+            setDeviceUnlockAvailable(false);
+          }
+        }
 
         setRestoredAuth({
           token: tokenResponse.access_token,
           user
         });
-        setPasscodeAvailable(hasLocalVaultPasscode(user.id));
+        setDeviceUnlockAvailable(hasLocalDeviceVault(user.id));
       } catch {
         // No valid refresh cookie means the normal sign-in form is shown.
         if (!cancelled) {
-          setPasscodeAvailable(false);
+          setDeviceUnlockAvailable(false);
         }
       } finally {
         if (!cancelled) {
@@ -384,12 +414,6 @@ function VaultApp() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (restoredAuth) {
-      setUnlockMethod(passcodeAvailable ? "passcode" : "password");
-    }
-  }, [passcodeAvailable, restoredAuth]);
 
   const totalPlaintextBytes = useMemo(
     () => files.reduce(
@@ -410,7 +434,8 @@ function VaultApp() {
     let recoveryKey: string | null = null;
     const {
       createVaultProfile,
-      hasLocalVaultPasscode,
+      hasLocalDeviceVault,
+      saveLocalDeviceVault,
       unlockVault
     } = await import("./crypto");
 
@@ -453,10 +478,16 @@ function VaultApp() {
       }
     }
 
+    try {
+      await saveLocalDeviceVault(user.id, vaultKey);
+    } catch {
+      // File refresh still works after password unlock; auto-unlock is optional.
+    }
+
+    sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
     setSession({ token, user, vaultKey });
     setRestoredAuth(null);
-    setPasscodeAvailable(hasLocalVaultPasscode(user.id));
-    setUnlockMethod("password");
+    setDeviceUnlockAvailable(hasLocalDeviceVault(user.id));
     setRecoveryKeyToSave(recoveryKey);
     setNotice({ tone: "success", message: "Vault unlocked" });
     navigateTo("files");
@@ -533,44 +564,6 @@ function VaultApp() {
     }
   }
 
-  async function handlePasscodeUnlock(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    if (!restoredAuth) return;
-
-    setAuthBusy(true);
-    setNotice(null);
-    const form = new FormData(event.currentTarget);
-    const passcode = String(form.get("passcode") ?? "").trim();
-    let vaultKey: Uint8Array | null = null;
-
-    try {
-      const { unlockVaultWithLocalPasscode } = await import("./crypto");
-      vaultKey = await unlockVaultWithLocalPasscode(
-        passcode,
-        restoredAuth.user.id
-      );
-      setSession({
-        token: restoredAuth.token,
-        user: restoredAuth.user,
-        vaultKey
-      });
-      vaultKey = null;
-      setRestoredAuth(null);
-      setNotice({ tone: "success", message: "Files unlocked" });
-      navigateTo("files");
-    } catch (error) {
-      setNotice({ tone: "error", message: getErrorMessage(error) });
-    } finally {
-      if (vaultKey) {
-        const { zeroKey } = await import("./crypto");
-        await zeroKey(vaultKey);
-      }
-
-      setAuthBusy(false);
-    }
-  }
-
   async function handleUseAnotherAccount() {
     if (!restoredAuth) return;
 
@@ -583,8 +576,7 @@ function VaultApp() {
       // The local sign-in form can still reset even if the server session ended.
     } finally {
       setRestoredAuth(null);
-      setPasscodeAvailable(false);
-      setUnlockMethod("password");
+      setDeviceUnlockAvailable(false);
       setAuthMode("login");
       navigateTo("auth");
       setAuthBusy(false);
@@ -723,8 +715,9 @@ function VaultApp() {
 
     try {
       const {
-        hasLocalVaultPasscode,
+        hasLocalDeviceVault,
         rewrapVaultKey,
+        saveLocalDeviceVault,
         unlockVaultWithRecoveryKey
       } = await import("./crypto");
       recoveredVaultKey = await unlockVaultWithRecoveryKey(
@@ -743,14 +736,19 @@ function VaultApp() {
         profile
       );
       const user = await getCurrentUser(tokenResponse.access_token);
+      try {
+        await saveLocalDeviceVault(user.id, recoveredVaultKey);
+      } catch {
+        // Auto-unlock is optional; recovery should still complete.
+      }
+      sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
       setSession({
         token: tokenResponse.access_token,
         user,
         vaultKey: recoveredVaultKey
       });
       setRestoredAuth(null);
-      setPasscodeAvailable(hasLocalVaultPasscode(user.id));
-      setUnlockMethod("password");
+      setDeviceUnlockAvailable(hasLocalDeviceVault(user.id));
       recoveredVaultKey = null;
       setRecoveryStage(null);
       setPendingPasswordRecovery(null);
@@ -834,36 +832,10 @@ function VaultApp() {
     }
   }
 
-  async function handlePasscodeChange(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  async function handleTrustedDeviceRemoval() {
     if (!session) return;
 
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const passcodeLength = Number(
-      form.get("passcode_length") ?? "6"
-    ) as VaultPasscodeLength;
-    const passcode = String(form.get("passcode") ?? "").trim();
-    const confirmPasscode = String(
-      form.get("confirm_passcode") ?? ""
-    ).trim();
-
-    if (![4, 6, 8].includes(passcodeLength)) {
-      setNotice({ tone: "error", message: "Choose a valid passcode length" });
-      return;
-    }
-
-    if (!/^\d+$/.test(passcode) || passcode.length !== passcodeLength) {
-      setNotice({
-        tone: "error",
-        message: `Passcode must be exactly ${passcodeLength} digits`
-      });
-      return;
-    }
-
-    if (passcode !== confirmPasscode) {
-      setNotice({ tone: "error", message: "Passcodes do not match" });
+    if (!window.confirm("Forget this device for automatic file unlock?")) {
       return;
     }
 
@@ -871,39 +843,10 @@ function VaultApp() {
     setNotice(null);
 
     try {
-      const { saveLocalVaultPasscode } = await import("./crypto");
-      await saveLocalVaultPasscode(
-        passcode,
-        session.user.id,
-        session.vaultKey,
-        passcodeLength
-      );
-      setPasscodeAvailable(true);
-      formElement.reset();
-      setNotice({ tone: "success", message: "Files passcode saved" });
-    } catch (error) {
-      setNotice({ tone: "error", message: getErrorMessage(error) });
-    } finally {
-      setAuthBusy(false);
-    }
-  }
-
-  async function handlePasscodeRemoval() {
-    if (!session) return;
-
-    if (!window.confirm("Remove the files passcode from this device?")) {
-      return;
-    }
-
-    setAuthBusy(true);
-    setNotice(null);
-
-    try {
-      const { removeLocalVaultPasscode } = await import("./crypto");
-      removeLocalVaultPasscode(session.user.id);
-      setPasscodeAvailable(false);
-      setUnlockMethod("password");
-      setNotice({ tone: "success", message: "Files passcode removed" });
+      const { removeLocalDeviceVault } = await import("./crypto");
+      removeLocalDeviceVault(session.user.id);
+      setDeviceUnlockAvailable(false);
+      setNotice({ tone: "success", message: "Device forgotten" });
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
     } finally {
@@ -1149,8 +1092,7 @@ function VaultApp() {
     await zeroKey(activeSession.vaultKey);
     setSession(null);
     setRestoredAuth(null);
-    setPasscodeAvailable(false);
-    setUnlockMethod("password");
+    setDeviceUnlockAvailable(false);
     setFiles([]);
     setSecurityOpen(false);
     setShareFile(null);
@@ -1164,13 +1106,13 @@ function VaultApp() {
       token: activeSession.token,
       user: activeSession.user
     };
-    const { hasLocalVaultPasscode } = await import("./crypto");
-    const hasPasscode = hasLocalVaultPasscode(activeSession.user.id);
+    const { hasLocalDeviceVault } = await import("./crypto");
+    const hasDeviceUnlock = hasLocalDeviceVault(activeSession.user.id);
 
+    sessionStorage.setItem(MANUAL_LOCK_STORAGE_KEY, "1");
     await clearLocalSession(activeSession);
     setRestoredAuth(restoredSession);
-    setPasscodeAvailable(hasPasscode);
-    setUnlockMethod(hasPasscode ? "passcode" : "password");
+    setDeviceUnlockAvailable(hasDeviceUnlock);
     navigateTo("files");
     setNotice(null);
   }
@@ -1183,6 +1125,8 @@ function VaultApp() {
     try {
       if (allDevices) {
         await logoutAll(activeSession.token);
+        const { removeLocalDeviceVault } = await import("./crypto");
+        removeLocalDeviceVault(activeSession.user.id);
       } else {
         await logout(activeSession.token);
       }
@@ -1190,6 +1134,7 @@ function VaultApp() {
       // The local vault still locks if the network session is already invalid.
     } finally {
       await clearLocalSession(activeSession);
+      sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
       navigateTo("auth");
       setNotice(null);
     }
@@ -1223,45 +1168,6 @@ function VaultApp() {
   function renderRestoredUnlockForm(formClassName = "auth-form") {
     if (!restoredAuth) return null;
 
-    if (passcodeAvailable && unlockMethod === "passcode") {
-      return (
-        <form key="restored-passcode-form" className={formClassName} onSubmit={handlePasscodeUnlock}>
-          <div className="restored-account">
-            <strong>{restoredAuth.user.username}</strong>
-            <span>{restoredAuth.user.email}</span>
-          </div>
-
-          <label>
-            Files passcode
-            <input
-              name="passcode"
-              type="password"
-              required
-              minLength={4}
-              maxLength={8}
-              pattern="[0-9]{4}|[0-9]{6}|[0-9]{8}"
-              inputMode="numeric"
-              autoComplete="off"
-              autoFocus
-            />
-          </label>
-
-          <button className="primary-button" type="submit" disabled={authBusy}>
-            {authBusy ? <LoaderCircle className="spin" size={18} /> : <LockKeyhole size={18} />}
-            Unlock files
-          </button>
-
-          <button className="text-button" type="button" onClick={() => setUnlockMethod("password")} disabled={authBusy}>
-            Use account password
-          </button>
-
-          <button className="text-button" type="button" onClick={() => void handleUseAnotherAccount()} disabled={authBusy}>
-            Use another account
-          </button>
-        </form>
-      );
-    }
-
     return (
       <form key="restored-unlock-form" className={formClassName} onSubmit={handleRestoredUnlock}>
         <div className="restored-account">
@@ -1285,12 +1191,6 @@ function VaultApp() {
           {authBusy ? <LoaderCircle className="spin" size={18} /> : <LockKeyhole size={18} />}
           Unlock vault
         </button>
-
-        {passcodeAvailable && (
-          <button className="text-button" type="button" onClick={() => setUnlockMethod("passcode")} disabled={authBusy}>
-            Use files passcode
-          </button>
-        )}
 
         <button className="text-button" type="button" onClick={() => void handleUseAnotherAccount()} disabled={authBusy}>
           Use another account
@@ -1320,9 +1220,7 @@ function VaultApp() {
   const authDescription = checkingStoredSession
     ? "Looking for an active session"
     : restoredAuth && showRestoredUnlock
-      ? passcodeAvailable && unlockMethod === "passcode"
-        ? `Signed in as ${restoredAuth.user.username}. Enter your files passcode.`
-        : `Signed in as ${restoredAuth.user.username}. Enter your password to decrypt files.`
+      ? `Signed in as ${restoredAuth.user.username}. Enter your password to decrypt files.`
       : recoveryStage === "request"
         ? "Request a recovery code"
         : recoveryStage === "otp" && pendingPasswordRecovery
@@ -1386,9 +1284,7 @@ function VaultApp() {
               <p>
                 {checkingStoredSession
                   ? "Checking saved session"
-                  : passcodeAvailable && unlockMethod === "passcode"
-                    ? "Enter your files passcode to continue"
-                    : "Enter your vault password to continue"}
+                  : "Enter your vault password to continue"}
               </p>
             </div>
           </div>
@@ -1836,57 +1732,18 @@ function VaultApp() {
               </button>
             </form>
 
-            <form className="security-form" onSubmit={handlePasscodeChange}>
-              <h3>{passcodeAvailable ? "Update files passcode" : "Create files passcode"}</h3>
-              <label>
-                Passcode length
-                <select name="passcode_length" defaultValue="6">
-                  <option value="4">4 digits</option>
-                  <option value="6">6 digits</option>
-                  <option value="8">8 digits</option>
-                </select>
-              </label>
-              <label>
-                Files passcode
-                <input
-                  name="passcode"
-                  type="password"
-                  required
-                  minLength={4}
-                  maxLength={8}
-                  pattern="[0-9]{4}|[0-9]{6}|[0-9]{8}"
-                  inputMode="numeric"
-                  autoComplete="off"
-                />
-              </label>
-              <label>
-                Confirm passcode
-                <input
-                  name="confirm_passcode"
-                  type="password"
-                  required
-                  minLength={4}
-                  maxLength={8}
-                  pattern="[0-9]{4}|[0-9]{6}|[0-9]{8}"
-                  inputMode="numeric"
-                  autoComplete="off"
-                />
-              </label>
-              <button className="primary-button" type="submit" disabled={authBusy}>
-                {authBusy ? <LoaderCircle className="spin" size={18} /> : <LockKeyhole size={18} />}
-                {passcodeAvailable ? "Update passcode" : "Save passcode"}
-              </button>
-            </form>
-
-            {passcodeAvailable && (
-              <div className="security-section">
-                <h3>Files passcode</h3>
-                <button className="secondary-button danger-command" type="button" onClick={() => void handlePasscodeRemoval()} disabled={authBusy}>
-                  <Trash2 size={17} />
-                  Remove from device
-                </button>
+            <div className="security-section">
+              <div>
+                <h3>Trusted device</h3>
+                <p>{deviceUnlockAvailable ? "Files can reopen after refresh on this browser." : "This browser is not remembered."}</p>
               </div>
-            )}
+              {deviceUnlockAvailable && (
+                <button className="secondary-button danger-command" type="button" onClick={() => void handleTrustedDeviceRemoval()} disabled={authBusy}>
+                  <Trash2 size={17} />
+                  Forget device
+                </button>
+              )}
+            </div>
 
             <div className="security-section">
               <h3>Recovery key</h3>

@@ -17,18 +17,17 @@ import type {
 
 
 function getDefaultApiUrl(): string {
-  // In development the Vite proxy forwards /auth, /files and /shares to the
-  // backend, so all requests stay on the same origin and cookies work without
-  // any SameSite or CORS gymnastics.
+  // In development the Vite proxy forwards /api to the backend, so browser
+  // page routes such as /files never collide with API routes.
   if (import.meta.env.DEV) {
-    return "";
+    return "/api";
   }
 
   if (typeof window === "undefined" || !window.location.hostname) {
-    return "http://127.0.0.1:8000";
+    return "http://127.0.0.1:8000/api";
   }
 
-  return `${window.location.protocol}//${window.location.hostname}:8000`;
+  return `${window.location.protocol}//${window.location.hostname}:8000/api`;
 }
 
 

@@ -55,7 +55,7 @@ def test_registration_hashes_password_and_hides_hash(
 ) -> None:
     password = "StrongPassword-123"
     request_response = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={
             "username": "alice",
             "email": "alice@example.com",
@@ -66,7 +66,7 @@ def test_registration_hashes_password_and_hides_hash(
     assert request_response.status_code == 202
     assert "otp" not in request_response.json()
     resend_response = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={
             "username": "alice",
             "email": "alice@example.com",
@@ -88,7 +88,7 @@ def test_registration_hashes_password_and_hides_hash(
         db.close()
 
     response = client.post(
-        "/auth/register/verify",
+        "/api/auth/register/verify",
         json={
             "verification_id": request_response.json()["verification_id"],
             "otp": sent_registration_otps["alice@example.com"]
@@ -123,12 +123,12 @@ def test_duplicate_username_and_email_are_rejected(
         "password": "StrongPassword-123"
     }
     request_response = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json=user
     )
     assert request_response.status_code == 202
     assert client.post(
-        "/auth/register/verify",
+        "/api/auth/register/verify",
         json={
             "verification_id": request_response.json()["verification_id"],
             "otp": sent_registration_otps[user["email"]]
@@ -136,11 +136,11 @@ def test_duplicate_username_and_email_are_rejected(
     ).status_code == 201
 
     duplicate_username = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={**user, "email": "other@example.com"}
     )
     duplicate_email = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={**user, "username": "other-user"}
     )
 
@@ -156,7 +156,7 @@ def test_registration_rejects_wrong_and_expired_otp(
 ) -> None:
     email = "otp@example.com"
     request_response = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={
             "username": "otp-user",
             "email": email,
@@ -168,12 +168,12 @@ def test_registration_rejects_wrong_and_expired_otp(
     wrong_otp = "000000" if delivered_otp != "000000" else "111111"
 
     wrong_response = client.post(
-        "/auth/register/verify",
+        "/api/auth/register/verify",
         json={"verification_id": verification_id, "otp": wrong_otp}
     )
     assert wrong_response.status_code == 400
     assert client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": "otp-user", "password": "StrongPassword-123"}
     ).status_code == 401
 
@@ -187,7 +187,7 @@ def test_registration_rejects_wrong_and_expired_otp(
         db.close()
 
     expired_response = client.post(
-        "/auth/register/verify",
+        "/api/auth/register/verify",
         json={
             "verification_id": verification_id,
             "otp": delivered_otp
@@ -207,7 +207,7 @@ def test_registration_invalidates_code_after_attempt_limit(
 ) -> None:
     email = "attempts@example.com"
     request_response = client.post(
-        "/auth/register/request-otp",
+        "/api/auth/register/request-otp",
         json={
             "username": "attempt-user",
             "email": email,
@@ -220,13 +220,13 @@ def test_registration_invalidates_code_after_attempt_limit(
 
     for _ in range(5):
         response = client.post(
-            "/auth/register/verify",
+            "/api/auth/register/verify",
             json={"verification_id": verification_id, "otp": wrong_otp}
         )
         assert response.status_code == 400
 
     used_response = client.post(
-        "/auth/register/verify",
+        "/api/auth/register/verify",
         json={"verification_id": verification_id, "otp": delivered_otp}
     )
     assert used_response.status_code == 400
@@ -246,7 +246,7 @@ def test_login_and_current_user_endpoint(
     user = create_authenticated_user("login")
     headers = {"Authorization": f"Bearer {user['token']}"}
 
-    response = client.get("/auth/me", headers=headers)
+    response = client.get("/api/auth/me", headers=headers)
 
     assert response.status_code == 200
     assert response.json()["username"] == user["username"]
@@ -261,10 +261,10 @@ def test_invalid_credentials_and_missing_token_are_rejected(
     user = create_authenticated_user("invalid")
 
     invalid_login = client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": "wrong-password"}
     )
-    missing_token = client.get("/auth/me")
+    missing_token = client.get("/api/auth/me")
 
     assert invalid_login.status_code == 401
     assert missing_token.status_code == 401
@@ -281,7 +281,7 @@ def test_crypto_profile_create_read_and_rotate_recovery_key(
     initial_profile = crypto_profile_payload(1)
 
     create_response = client.post(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=headers,
         json=initial_profile
     )
@@ -289,22 +289,22 @@ def test_crypto_profile_create_read_and_rotate_recovery_key(
     assert create_response.status_code == 201
     assert create_response.json() == initial_profile
     assert client.post(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=headers,
         json=initial_profile
     ).status_code == 409
 
-    read_response = client.get("/auth/crypto-profile", headers=headers)
+    read_response = client.get("/api/auth/crypto-profile", headers=headers)
     assert read_response.status_code == 200
     assert read_response.json() == initial_profile
     assert client.get(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=other_headers
     ).status_code == 404
 
     rotated = crypto_profile_payload(4)
     rotate_response = client.put(
-        "/auth/recovery-key",
+        "/api/auth/recovery-key",
         headers=headers,
         json={
             "recovery_profile": {
@@ -325,7 +325,7 @@ def test_crypto_profile_create_read_and_rotate_recovery_key(
         }
     }
     updated_profile = client.get(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=headers
     ).json()
     assert password_profile_payload(updated_profile) == (
@@ -343,7 +343,7 @@ def test_crypto_profile_rejects_invalid_base64(
     profile["kdf_salt"] = "not-base64!"
 
     response = client.post(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=headers,
         json=profile
     )
@@ -359,41 +359,41 @@ def test_refresh_logout_and_logout_all_revoke_sessions(
     first_headers = {"Authorization": f"Bearer {user['token']}"}
 
     second_login = client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": user["password"]}
     )
     assert second_login.status_code == 200
     second_token = second_login.json()["access_token"]
 
-    refresh_response = client.post("/auth/refresh")
+    refresh_response = client.post("/api/auth/refresh")
     assert refresh_response.status_code == 200
     refreshed_token = refresh_response.json()["access_token"]
     assert refreshed_token != second_token
 
     logout_all = client.post(
-        "/auth/logout-all",
+        "/api/auth/logout-all",
         headers={"Authorization": f"Bearer {refreshed_token}"}
     )
     assert logout_all.status_code == 204
-    assert client.get("/auth/me", headers=first_headers).status_code == 401
+    assert client.get("/api/auth/me", headers=first_headers).status_code == 401
     assert client.get(
-        "/auth/me",
+        "/api/auth/me",
         headers={"Authorization": f"Bearer {refreshed_token}"}
     ).status_code == 401
-    assert client.post("/auth/refresh").status_code == 401
+    assert client.post("/api/auth/refresh").status_code == 401
 
     login_again = client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": user["password"]}
     )
     token = login_again.json()["access_token"]
     logout = client.post(
-        "/auth/logout",
+        "/api/auth/logout",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert logout.status_code == 204
     assert client.get(
-        "/auth/me",
+        "/api/auth/me",
         headers={"Authorization": f"Bearer {token}"}
     ).status_code == 401
 
@@ -407,11 +407,11 @@ def test_immediate_duplicate_refresh_does_not_revoke_session(
 
     assert original_refresh_cookie
 
-    refresh_response = client.post("/auth/refresh")
+    refresh_response = client.post("/api/auth/refresh")
     assert refresh_response.status_code == 200
 
     duplicate_response = client.post(
-        "/auth/refresh",
+        "/api/auth/refresh",
         headers={
             "Cookie": (
                 f"{settings.refresh_cookie_name}={original_refresh_cookie}"
@@ -422,7 +422,7 @@ def test_immediate_duplicate_refresh_does_not_revoke_session(
 
     duplicate_token = duplicate_response.json()["access_token"]
     assert client.get(
-        "/auth/me",
+        "/api/auth/me",
         headers={"Authorization": f"Bearer {duplicate_token}"}
     ).status_code == 200
 
@@ -436,20 +436,20 @@ def test_password_change_rewraps_profile_and_revokes_other_sessions(
     old_headers = {"Authorization": f"Bearer {old_token}"}
     initial_profile = crypto_profile_payload(1)
     assert client.post(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=old_headers,
         json=initial_profile
     ).status_code == 201
 
     other_login = client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": user["password"]}
     )
     other_token = other_login.json()["access_token"]
     changed_profile = crypto_profile_payload(8)
     new_password = "Different-Strong-Password-456"
     change_response = client.post(
-        "/auth/password/change",
+        "/api/auth/password/change",
         headers=old_headers,
         json={
             "current_password": user["password"],
@@ -460,22 +460,22 @@ def test_password_change_rewraps_profile_and_revokes_other_sessions(
 
     assert change_response.status_code == 200
     new_token = change_response.json()["access_token"]
-    assert client.get("/auth/me", headers=old_headers).status_code == 401
+    assert client.get("/api/auth/me", headers=old_headers).status_code == 401
     assert client.get(
-        "/auth/me",
+        "/api/auth/me",
         headers={"Authorization": f"Bearer {other_token}"}
     ).status_code == 401
     assert client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": user["password"]}
     ).status_code == 401
     assert client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": new_password}
     ).status_code == 200
 
     stored_profile = client.get(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers={"Authorization": f"Bearer {new_token}"}
     ).json()
     assert password_profile_payload(stored_profile) == (
@@ -495,19 +495,19 @@ def test_password_recovery_requires_otp_and_is_one_time(
     old_headers = {"Authorization": f"Bearer {user['token']}"}
     initial_profile = crypto_profile_payload(2)
     assert client.post(
-        "/auth/crypto-profile",
+        "/api/auth/crypto-profile",
         headers=old_headers,
         json=initial_profile
     ).status_code == 201
 
     request_response = client.post(
-        "/auth/password/recovery/request-otp",
+        "/api/auth/password/recovery/request-otp",
         json={"identifier": user["email"]}
     )
     assert request_response.status_code == 202
     verification_id = request_response.json()["verification_id"]
     verify_response = client.post(
-        "/auth/password/recovery/verify",
+        "/api/auth/password/recovery/verify",
         json={
             "verification_id": verification_id,
             "otp": sent_registration_otps[str(user["email"])]
@@ -529,17 +529,17 @@ def test_password_recovery_requires_otp_and_is_one_time(
         "crypto_profile": password_profile_payload(recovered_profile)
     }
     complete_response = client.post(
-        "/auth/password/recovery/complete",
+        "/api/auth/password/recovery/complete",
         json=complete_payload
     )
     assert complete_response.status_code == 200
     assert client.post(
-        "/auth/password/recovery/complete",
+        "/api/auth/password/recovery/complete",
         json=complete_payload
     ).status_code == 400
-    assert client.get("/auth/me", headers=old_headers).status_code == 401
+    assert client.get("/api/auth/me", headers=old_headers).status_code == 401
     assert client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": new_password}
     ).status_code == 200
 
@@ -552,14 +552,14 @@ def test_login_rate_limit_blocks_correct_password_after_failures(
 
     for attempt in range(5):
         response = client.post(
-            "/auth/login",
+            "/api/auth/login",
             data={"username": user["username"], "password": "wrong-password"}
         )
         expected_status = 429 if attempt == 4 else 401
         assert response.status_code == expected_status
 
     blocked = client.post(
-        "/auth/login",
+        "/api/auth/login",
         data={"username": user["username"], "password": user["password"]}
     )
     assert blocked.status_code == 429

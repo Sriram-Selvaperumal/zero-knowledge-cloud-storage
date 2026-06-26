@@ -40,8 +40,8 @@ and have a configurable resend cooldown.
 
 The registration API is a two-step flow:
 
-- `POST /auth/register/request-otp`
-- `POST /auth/register/verify`
+- `POST /api/auth/register/request-otp`
+- `POST /api/auth/register/verify`
 
 ## Account Security
 
@@ -68,12 +68,12 @@ Public access uses a throttled password proof. A successful proof returns a
 short-lived download grant, while revoked and expired links stop working
 immediately. The API supports creating, listing, and revoking shares:
 
-- `POST /files/{file_id}/shares`
-- `GET /files/{file_id}/shares`
-- `DELETE /files/{file_id}/shares/{share_id}`
-- `GET /shares/{token}`
-- `POST /shares/{token}/unlock`
-- `GET /shares/{token}/download`
+- `POST /api/files/{file_id}/shares`
+- `GET /api/files/{file_id}/shares`
+- `DELETE /api/files/{file_id}/shares/{share_id}`
+- `GET /api/shares/{token}`
+- `POST /api/shares/{token}/unlock`
+- `GET /api/shares/{token}/download`
 
 ## Database Migrations
 

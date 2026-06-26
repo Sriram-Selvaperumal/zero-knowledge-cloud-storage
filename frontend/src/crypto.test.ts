@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
-  createVaultPasscodeEnvelope,
   createPasswordProtectedShare,
   createVaultProfile,
   decryptFile,
@@ -10,13 +9,12 @@ import {
   decryptSharedManifest,
   deriveShareAccess,
   encryptFile,
-  hasLocalVaultPasscode,
+  hasLocalDeviceVault,
   rewrapVaultKey,
-  removeLocalVaultPasscode,
-  saveLocalVaultPasscode,
+  removeLocalDeviceVault,
+  saveLocalDeviceVault,
   unlockVault,
-  unlockVaultWithLocalPasscode,
-  unlockVaultWithPasscode,
+  unlockVaultWithLocalDevice,
   unlockVaultWithRecoveryKey,
   zeroKey
 } from "./crypto";
@@ -81,37 +79,7 @@ describe("client-side encryption protocol", () => {
     }
   });
 
-  it("wraps the vault key with a local files passcode", async () => {
-    const setup = await createVaultProfile("vault-password", 71);
-    const envelope = await createVaultPasscodeEnvelope(
-      "123456",
-      71,
-      setup.vaultKey,
-      6
-    );
-    const unlockedWithPasscode = await unlockVaultWithPasscode(
-      "123456",
-      71,
-      envelope
-    );
-
-    try {
-      expect(Array.from(unlockedWithPasscode)).toEqual(
-        Array.from(setup.vaultKey)
-      );
-      await expect(
-        unlockVaultWithPasscode("654321", 71, envelope)
-      ).rejects.toThrow();
-      await expect(
-        createVaultPasscodeEnvelope("12345", 71, setup.vaultKey, 6)
-      ).rejects.toThrow();
-    } finally {
-      await zeroKey(setup.vaultKey);
-      await zeroKey(unlockedWithPasscode);
-    }
-  });
-
-  it("stores and removes a local files passcode envelope", async () => {
+  it("stores and removes a local trusted-device vault envelope", async () => {
     const localStore = new Map<string, string>();
     const localStorageMock = {
       get length() {
@@ -130,29 +98,27 @@ describe("client-side encryption protocol", () => {
     vi.stubGlobal("localStorage", localStorageMock);
 
     const setup = await createVaultProfile("vault-password", 72);
-    const envelope = await saveLocalVaultPasscode(
-      "1234",
+    const envelope = await saveLocalDeviceVault(
       72,
-      setup.vaultKey,
-      4
+      setup.vaultKey
     );
-    const unlockedWithPasscode = await unlockVaultWithLocalPasscode(
-      "1234",
+    const unlockedWithDevice = await unlockVaultWithLocalDevice(
       72
     );
 
     try {
       expect(envelope.wrapped_vault_key).not.toBe("");
-      expect(hasLocalVaultPasscode(72)).toBe(true);
-      expect(Array.from(unlockedWithPasscode)).toEqual(
+      expect(hasLocalDeviceVault(72)).toBe(true);
+      expect(Array.from(unlockedWithDevice)).toEqual(
         Array.from(setup.vaultKey)
       );
 
-      removeLocalVaultPasscode(72);
-      expect(hasLocalVaultPasscode(72)).toBe(false);
+      removeLocalDeviceVault(72);
+      expect(hasLocalDeviceVault(72)).toBe(false);
+      await expect(unlockVaultWithLocalDevice(72)).rejects.toThrow();
     } finally {
       await zeroKey(setup.vaultKey);
-      await zeroKey(unlockedWithPasscode);
+      await zeroKey(unlockedWithDevice);
     }
   });
 

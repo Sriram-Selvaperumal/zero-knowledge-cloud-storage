@@ -85,6 +85,12 @@ from app.services.session_service import (
 )
 
 
+REFRESH_COOKIE_PATH = (
+    f"{settings.api_prefix}/auth"
+    if settings.api_prefix
+    else "/auth"
+)
+
 router = APIRouter(
     prefix="/auth",
     tags=["Authentication"]
@@ -99,7 +105,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         httponly=True,
         secure=settings.refresh_cookie_secure,
         samesite="lax",
-        path="/auth"
+        path=REFRESH_COOKIE_PATH
     )
 
 
@@ -109,7 +115,7 @@ def _clear_refresh_cookie(response: Response) -> None:
         httponly=True,
         secure=settings.refresh_cookie_secure,
         samesite="lax",
-        path="/auth"
+        path=REFRESH_COOKIE_PATH
     )
 
 

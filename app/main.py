@@ -19,9 +19,9 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-app.include_router(auth_router)
-app.include_router(files_router)
-app.include_router(shares_router)
+app.include_router(auth_router, prefix=settings.api_prefix)
+app.include_router(files_router, prefix=settings.api_prefix)
+app.include_router(shares_router, prefix=settings.api_prefix)
 
 
 @app.get("/")
