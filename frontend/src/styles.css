@@ -404,6 +404,10 @@ button:disabled {
   min-height: 38px;
 }
 
+.secondary-button.compact {
+  min-height: 38px;
+}
+
 .secondary-button {
   min-height: 36px;
   padding: 0 13px;
@@ -566,6 +570,40 @@ button:disabled {
 
 .share-panel {
   width: min(100%, 610px);
+}
+
+.folder-panel {
+  width: min(100%, 460px);
+}
+
+.folder-form {
+  display: grid;
+  gap: 14px;
+}
+
+.folder-form label {
+  display: grid;
+  gap: 7px;
+  color: #3e4c52;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.folder-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #cbd4d7;
+  border-radius: 6px;
+  color: #182126;
+  background: #ffffff;
+  outline: none;
+}
+
+.folder-form input:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
 .share-form {
@@ -874,6 +912,44 @@ button:disabled {
   margin-bottom: 20px;
 }
 
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.vault-breadcrumb {
+  min-height: 38px;
+  margin: -4px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.vault-breadcrumb button {
+  max-width: 220px;
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid #cfd9dc;
+  border-radius: 6px;
+  color: #41545b;
+  background: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-breadcrumb button:not(:disabled):hover {
+  color: #0f766e;
+  border-color: #8ab9b4;
+  background: #eff8f7;
+}
+
 .drop-zone {
   min-height: 92px;
   padding: 18px 20px;
@@ -979,39 +1055,59 @@ button:disabled {
 }
 
 .file-table th:last-child {
-  width: 148px;
+  width: 228px;
 }
 
-.file-name-cell {
+.file-name-cell,
+.folder-name-button {
   min-width: 0;
   display: flex;
   align-items: center;
   gap: 11px;
 }
 
-.file-name-cell > svg {
+.folder-name-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+}
+
+.folder-name-button:hover strong {
+  color: #0f766e;
+}
+
+.file-name-cell > svg,
+.folder-name-button > svg {
   min-width: 20px;
   color: #0f766e;
 }
 
-.file-name-cell > div {
+.file-name-cell > div,
+.folder-name-button > div {
   min-width: 0;
   display: grid;
   gap: 2px;
 }
 
 .file-name-cell strong,
-.file-name-cell span {
+.file-name-cell span,
+.folder-name-button strong,
+.folder-name-button span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.file-name-cell strong {
+.file-name-cell strong,
+.folder-name-button strong {
   font-size: 13px;
 }
 
 .file-name-cell span,
+.folder-name-button span,
 .file-table td {
   color: #65747a;
   font-size: 12px;
@@ -1182,6 +1278,21 @@ button:disabled {
     padding-top: 24px;
   }
 
+  .workspace-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .workspace-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .workspace-actions .primary-button,
+  .workspace-actions .secondary-button {
+    flex: 1 1 140px;
+  }
+
   .drop-zone {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -1200,5 +1311,14 @@ button:disabled {
 
   .file-table th:first-child {
     width: auto;
+  }
+
+  .file-table th:last-child {
+    width: 174px;
+  }
+
+  .row-actions {
+    flex-wrap: wrap;
+    gap: 5px;
   }
 }

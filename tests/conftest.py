@@ -69,6 +69,7 @@ from app.main import app
 from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
 from app.models.file_share import FileShare
+from app.models.folder import FolderMetadata
 from app.models.authentication_throttle import AuthenticationThrottle
 from app.models.password_recovery import PasswordRecoveryVerification
 from app.models.registration_verification import RegistrationVerification
@@ -93,6 +94,7 @@ def clear_test_state() -> None:
     try:
         db.query(FileShare).delete(synchronize_session=False)
         db.query(FileMetadata).delete(synchronize_session=False)
+        db.query(FolderMetadata).delete(synchronize_session=False)
         db.query(UserCryptoProfile).delete(synchronize_session=False)
         db.query(UserSession).delete(synchronize_session=False)
         db.query(PasswordRecoveryVerification).delete(

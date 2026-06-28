@@ -4,10 +4,12 @@ import {
   createPasswordProtectedShare,
   createVaultProfile,
   decryptFile,
+  decryptFolderName,
   decryptManifest,
   decryptSharedFile,
   decryptSharedManifest,
   deriveShareAccess,
+  encryptFolderName,
   encryptFile,
   hasLocalDeviceVault,
   rewrapVaultKey,
@@ -74,6 +76,27 @@ describe("client-side encryption protocol", () => {
       await expect(
         unlockVault("wrong-password", 7, setup.profile)
       ).rejects.toThrow();
+    } finally {
+      await zeroKey(setup.vaultKey);
+    }
+  });
+
+  it("round-trips encrypted folder names", async () => {
+    const setup = await createVaultProfile("folder-password", 88);
+
+    try {
+      const encrypted = await encryptFolderName(
+        "Client files",
+        setup.vaultKey
+      );
+      const decrypted = await decryptFolderName(
+        encrypted.encryptedName,
+        encrypted.metadata,
+        setup.vaultKey
+      );
+
+      expect(encrypted.encryptedName).not.toContain("Client files");
+      expect(decrypted).toBe("Client files");
     } finally {
       await zeroKey(setup.vaultKey);
     }

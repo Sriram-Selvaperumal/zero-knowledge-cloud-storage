@@ -29,10 +29,64 @@ class EncryptionMetadataV1(BaseModel):
         return ensure_base64(value)
 
 
+class FolderEncryptionMetadataV1(BaseModel):
+    version: Literal[1]
+    cipher: Literal["xchacha20-poly1305-folder"]
+    folder_id: str = Field(min_length=16, max_length=128)
+    wrapped_folder_key: str = Field(min_length=32, max_length=512)
+    wrapped_folder_key_nonce: str = Field(min_length=16, max_length=128)
+    name_nonce: str = Field(min_length=16, max_length=128)
+
+    @field_validator(
+        "folder_id",
+        "wrapped_folder_key",
+        "wrapped_folder_key_nonce",
+        "name_nonce"
+    )
+    @classmethod
+    def validate_base64_fields(cls, value: str) -> str:
+        return ensure_base64(value)
+
+
+class FolderCreateRequest(BaseModel):
+    encrypted_name: str = Field(min_length=16, max_length=1024)
+    encryption_metadata: FolderEncryptionMetadataV1
+    parent_id: int | None = Field(default=None, ge=1)
+
+    @field_validator("encrypted_name")
+    @classmethod
+    def validate_encrypted_name(cls, value: str) -> str:
+        return ensure_base64(value)
+
+
+class FolderMoveRequest(BaseModel):
+    parent_id: int | None = Field(default=None, ge=1)
+
+
+class FolderMetadataResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    parent_id: int | None = None
+    encrypted_name: str
+    encryption_metadata: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+
+
+class FileMoveRequest(BaseModel):
+    folder_id: int | None = Field(default=None, ge=1)
+
+
+class FileCopyRequest(BaseModel):
+    folder_id: int | None = Field(default=None, ge=1)
+
+
 class FileMetadataResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    folder_id: int | None = None
     encrypted_filename: str
     content_type: str | None = None
     size_bytes: int

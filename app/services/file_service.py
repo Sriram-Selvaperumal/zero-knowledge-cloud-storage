@@ -2,6 +2,7 @@ import base64
 import binascii
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models.file import FileMetadata
+from app.models.folder import FolderMetadata
 from app.models.user import User
 from app.schemas.file import EncryptionMetadataV1
 
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 MAX_ENCRYPTION_METADATA_LENGTH = 16 * 1024
+ALL_FOLDERS = object()
 
 
 class FileStorageError(Exception):
@@ -35,6 +38,10 @@ class EmptyFileError(FileStorageError):
 
 
 class InvalidFileMetadataError(FileStorageError):
+    pass
+
+
+class FolderTargetNotFoundError(FileStorageError):
     pass
 
 
@@ -97,13 +104,38 @@ def _safe_unlink(path: Path) -> None:
         logger.exception("Unable to clean up stored file content")
 
 
+def ensure_owned_folder(
+    db: Session,
+    owner_id: int,
+    folder_id: int | None
+) -> FolderMetadata | None:
+    if folder_id is None:
+        return None
+
+    folder = (
+        db.query(FolderMetadata)
+        .filter(
+            FolderMetadata.id == folder_id,
+            FolderMetadata.owner_id == owner_id
+        )
+        .first()
+    )
+
+    if folder is None:
+        raise FolderTargetNotFoundError("Folder not found")
+
+    return folder
+
+
 def save_uploaded_file(
     db: Session,
     owner: User,
     upload: UploadFile,
     encrypted_filename: str,
-    encryption_metadata: dict[str, Any] | None
+    encryption_metadata: dict[str, Any] | None,
+    folder_id: int | None = None
 ) -> FileMetadata:
+    ensure_owned_folder(db, owner.id, folder_id)
     encrypted_filename = encrypted_filename.strip()
 
     if not encrypted_filename:
@@ -175,6 +207,7 @@ def save_uploaded_file(
 
     file_metadata = FileMetadata(
         owner_id=owner.id,
+        folder_id=folder_id,
         encrypted_filename=encrypted_filename,
         storage_key=storage_key,
         content_type=content_type,
@@ -195,13 +228,22 @@ def save_uploaded_file(
     return file_metadata
 
 
-def list_owned_files(db: Session, owner_id: int) -> list[FileMetadata]:
-    return (
+def list_owned_files(
+    db: Session,
+    owner_id: int,
+    folder_id: int | None | object = ALL_FOLDERS
+) -> list[FileMetadata]:
+    query = (
         db.query(FileMetadata)
         .filter(FileMetadata.owner_id == owner_id)
-        .order_by(FileMetadata.created_at.desc())
-        .all()
     )
+
+    if folder_id is None:
+        query = query.filter(FileMetadata.folder_id.is_(None))
+    elif folder_id is not ALL_FOLDERS:
+        query = query.filter(FileMetadata.folder_id == folder_id)
+
+    return query.order_by(FileMetadata.created_at.desc()).all()
 
 
 def get_owned_file(
@@ -226,6 +268,67 @@ def get_download_path(file_metadata: FileMetadata) -> Path:
         raise FileNotFoundError("Stored file content was not found")
 
     return storage_path
+
+
+def move_owned_file(
+    db: Session,
+    file_metadata: FileMetadata,
+    owner_id: int,
+    folder_id: int | None
+) -> FileMetadata:
+    ensure_owned_folder(db, owner_id, folder_id)
+    file_metadata.folder_id = folder_id
+
+    try:
+        db.commit()
+        db.refresh(file_metadata)
+    except Exception:
+        db.rollback()
+        raise
+
+    return file_metadata
+
+
+def copy_owned_file(
+    db: Session,
+    file_metadata: FileMetadata,
+    owner: User,
+    folder_id: int | None
+) -> FileMetadata:
+    ensure_owned_folder(db, owner.id, folder_id)
+    source_path = get_download_path(file_metadata)
+    storage_key = f"{owner.id}/{uuid4().hex}.enc"
+    storage_path = _resolve_storage_path(storage_key)
+
+    try:
+        storage_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source_path, storage_path)
+    except OSError as exc:
+        _safe_unlink(storage_path)
+        _remove_empty_directory(storage_path.parent)
+        raise FileStorageError("Unable to copy stored file") from exc
+
+    copied_metadata = FileMetadata(
+        owner_id=owner.id,
+        folder_id=folder_id,
+        encrypted_filename=file_metadata.encrypted_filename,
+        storage_key=storage_key,
+        content_type=file_metadata.content_type,
+        size_bytes=file_metadata.size_bytes,
+        encryption_metadata=file_metadata.encryption_metadata
+    )
+
+    try:
+        db.add(copied_metadata)
+        db.commit()
+        db.refresh(copied_metadata)
+    except Exception:
+        db.rollback()
+        _safe_unlink(storage_path)
+        _remove_empty_directory(storage_path.parent)
+        raise
+
+    return copied_metadata
 
 
 def delete_owned_file(db: Session, file_metadata: FileMetadata) -> None:

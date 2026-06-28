@@ -66,8 +66,18 @@ export interface FileEncryptionMetadata {
   manifest_nonce: string;
 }
 
+export interface FolderEncryptionMetadata {
+  version: 1;
+  cipher: "xchacha20-poly1305-folder";
+  folder_id: string;
+  wrapped_folder_key: string;
+  wrapped_folder_key_nonce: string;
+  name_nonce: string;
+}
+
 export interface FileMetadata {
   id: number;
+  folder_id: number | null;
   encrypted_filename: string;
   content_type: string | null;
   size_bytes: number;
@@ -83,6 +93,19 @@ export interface DecryptedManifest {
 
 export interface DisplayFile extends FileMetadata {
   manifest: DecryptedManifest | null;
+}
+
+export interface FolderMetadata {
+  id: number;
+  parent_id: number | null;
+  encrypted_name: string;
+  encryption_metadata: FolderEncryptionMetadata;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DisplayFolder extends FolderMetadata {
+  name: string | null;
 }
 
 export interface ShareCreatePayload {

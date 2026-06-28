@@ -4,6 +4,8 @@ import type {
   FileEncryptionMetadata,
   FileShare,
   FileMetadata,
+  FolderEncryptionMetadata,
+  FolderMetadata,
   PasswordCryptoProfile,
   PasswordRecoveryGrant,
   RecoveryProfile,
@@ -274,8 +276,18 @@ export function completePasswordRecovery(
 }
 
 
-export function listFiles(token: string): Promise<FileMetadata[]> {
-  return request<FileMetadata[]>("/files", {}, token);
+function folderQuery(name: "folder_id" | "parent_id", id?: number | null): string {
+  if (id === undefined) return "";
+
+  return `?${name}=${id === null ? "root" : encodeURIComponent(String(id))}`;
+}
+
+
+export function listFiles(
+  token: string,
+  folderId?: number | null
+): Promise<FileMetadata[]> {
+  return request<FileMetadata[]>(`/files${folderQuery("folder_id", folderId)}`, {}, token);
 }
 
 
@@ -283,17 +295,52 @@ export function uploadEncryptedFile(
   token: string,
   ciphertext: Blob,
   encryptedFilename: string,
-  encryptionMetadata: FileEncryptionMetadata
+  encryptionMetadata: FileEncryptionMetadata,
+  folderId?: number | null
 ): Promise<FileMetadata> {
   const form = new FormData();
   form.append("file", ciphertext, "ciphertext.enc");
   form.append("encrypted_filename", encryptedFilename);
   form.append("encryption_metadata", JSON.stringify(encryptionMetadata));
 
+  if (folderId !== undefined) {
+    form.append("folder_id", folderId === null ? "root" : String(folderId));
+  }
+
   return request<FileMetadata>("/files/upload", {
     method: "POST",
     body: form
   }, token);
+}
+
+
+export function createFolder(
+  token: string,
+  encryptedName: string,
+  encryptionMetadata: FolderEncryptionMetadata,
+  parentId: number | null
+): Promise<FolderMetadata> {
+  return request<FolderMetadata>("/folders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      encrypted_name: encryptedName,
+      encryption_metadata: encryptionMetadata,
+      parent_id: parentId
+    })
+  }, token);
+}
+
+
+export function listFolders(
+  token: string,
+  parentId: number | null = null
+): Promise<FolderMetadata[]> {
+  return request<FolderMetadata[]>(
+    `/folders${folderQuery("parent_id", parentId)}`,
+    {},
+    token
+  );
 }
 
 
@@ -327,6 +374,53 @@ export async function downloadEncryptedFile(
 
 export function deleteFile(token: string, fileId: number): Promise<void> {
   return request<void>(`/files/${fileId}`, { method: "DELETE" }, token);
+}
+
+
+export function moveFile(
+  token: string,
+  fileId: number,
+  folderId: number | null
+): Promise<FileMetadata> {
+  return request<FileMetadata>(`/files/${fileId}/move`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_id: folderId })
+  }, token);
+}
+
+
+export function copyFile(
+  token: string,
+  fileId: number,
+  folderId: number | null
+): Promise<FileMetadata> {
+  return request<FileMetadata>(`/files/${fileId}/copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ folder_id: folderId })
+  }, token);
+}
+
+
+export function moveFolder(
+  token: string,
+  folderId: number,
+  parentId: number | null
+): Promise<FolderMetadata> {
+  return request<FolderMetadata>(`/folders/${folderId}/move`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parent_id: parentId })
+  }, token);
+}
+
+
+export function deleteFolder(
+  token: string,
+  folderId: number
+): Promise<void> {
+  return request<void>(`/folders/${folderId}`, { method: "DELETE" }, token);
 }
 
 

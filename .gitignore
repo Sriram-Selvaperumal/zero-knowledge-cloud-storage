@@ -8,6 +8,7 @@ __pycache__/
 *__init__.py
 storage/*
 !storage/.gitkeep
+logs/
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo

@@ -4,6 +4,7 @@ from sqlalchemy.orm import relationship
 from app.models.base import Base, utc_now
 from app.models.crypto_profile import UserCryptoProfile
 from app.models.file import FileMetadata
+from app.models.folder import FolderMetadata
 from app.models.password_recovery import PasswordRecoveryVerification
 from app.models.user_session import UserSession
 
@@ -25,6 +26,11 @@ class User(Base):
 
     files = relationship(
         FileMetadata,
+        back_populates="owner",
+        cascade="all, delete-orphan"
+    )
+    folders = relationship(
+        FolderMetadata,
         back_populates="owner",
         cascade="all, delete-orphan"
     )

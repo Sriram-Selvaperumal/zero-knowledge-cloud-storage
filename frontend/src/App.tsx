@@ -3,9 +3,12 @@ import {
   ArrowLeft,
   CheckCircle2,
   Cloud,
+  ClipboardPaste,
   Copy,
   Download,
   FileLock2,
+  Folder,
+  FolderPlus,
   FolderOpen,
   KeyRound,
   Link2,
@@ -17,6 +20,7 @@ import {
   Settings,
   Share2,
   ShieldCheck,
+  Scissors,
   Trash2,
   UploadCloud,
   X
@@ -36,9 +40,12 @@ import {
   ApiError,
   changePassword,
   completePasswordRecovery,
+  copyFile,
+  createFolder,
   createCryptoProfile,
   createFileShare,
   deleteFile,
+  deleteFolder,
   downloadSharedFile,
   downloadEncryptedFile,
   getCryptoProfile,
@@ -46,6 +53,7 @@ import {
   getShareAccessInfo,
   listFileShares,
   listFiles,
+  listFolders,
   login,
   logout,
   logoutAll,
@@ -57,6 +65,7 @@ import {
   setAccessTokenListener,
   verifyPasswordRecoveryOtp,
   verifyRegistrationOtp,
+  moveFile,
   uploadEncryptedFile,
   unlockFileShare
 } from "./api";
@@ -67,6 +76,7 @@ import {
 } from "./crypto-worker-client";
 import type {
   DisplayFile,
+  DisplayFolder,
   FileShare,
   PasswordRecoveryGrant,
   ShareAccessInfo,
@@ -90,6 +100,11 @@ interface RestoredAuth {
 interface Notice {
   tone: "success" | "error";
   message: string;
+}
+
+interface FileClipboard {
+  mode: "copy" | "move";
+  file: DisplayFile;
 }
 
 interface PendingRegistration {
@@ -326,8 +341,15 @@ function VaultApp() {
   const [restoredAuth, setRestoredAuth] = useState<RestoredAuth | null>(null);
   const [checkingStoredSession, setCheckingStoredSession] = useState(true);
   const [deviceUnlockAvailable, setDeviceUnlockAvailable] = useState(false);
+  const [folders, setFolders] = useState<DisplayFolder[]>([]);
   const [files, setFiles] = useState<DisplayFile[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+  const [currentFolderId, setCurrentFolderId] = useState<number | null>(null);
+  const [folderTrail, setFolderTrail] = useState<DisplayFolder[]>([]);
+  const [createFolderOpen, setCreateFolderOpen] = useState(false);
+  const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(
+    null
+  );
   const [authBusy, setAuthBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -355,12 +377,32 @@ function VaultApp() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sessionRef = useRef<Session | null>(null);
 
-  const loadFiles = useCallback(async (activeSession: Session) => {
+  const loadVaultItems = useCallback(async (
+    activeSession: Session,
+    folderId: number | null
+  ) => {
     setLoadingFiles(true);
 
     try {
-      const { decryptManifest } = await import("./crypto");
-      const records = await listFiles(activeSession.token);
+      const { decryptFolderName, decryptManifest } = await import("./crypto");
+      const [folderRecords, records] = await Promise.all([
+        listFolders(activeSession.token, folderId),
+        listFiles(activeSession.token, folderId)
+      ]);
+      const displayFolders = await Promise.all(
+        folderRecords.map(async (record): Promise<DisplayFolder> => {
+          try {
+            const name = await decryptFolderName(
+              record.encrypted_name,
+              record.encryption_metadata,
+              activeSession.vaultKey
+            );
+            return { ...record, name };
+          } catch {
+            return { ...record, name: null };
+          }
+        })
+      );
       const displayRecords = await Promise.all(
         records.map(async (record): Promise<DisplayFile> => {
           if (!record.encryption_metadata) {
@@ -380,6 +422,7 @@ function VaultApp() {
         })
       );
 
+      setFolders(displayFolders);
       setFiles(displayRecords);
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
@@ -390,9 +433,9 @@ function VaultApp() {
 
   useEffect(() => {
     if (session) {
-      void loadFiles(session);
+      void loadVaultItems(session, currentFolderId);
     }
-  }, [loadFiles, session]);
+  }, [currentFolderId, loadVaultItems, session]);
 
   useEffect(() => {
     if (!pendingRegistration || pendingRegistration.resendAfterSeconds <= 0) {
@@ -579,6 +622,8 @@ function VaultApp() {
     ),
     [files]
   );
+  const totalVisibleItems = folders.length + files.length;
+  const currentFolderName = folderTrail.at(-1)?.name ?? "Vault";
 
   async function unlockVaultSession(
     token: string,
@@ -1067,9 +1112,10 @@ function VaultApp() {
         session.token,
         encrypted.ciphertext,
         encrypted.encryptedFilename,
-        encrypted.metadata
+        encrypted.metadata,
+        currentFolderId
       );
-      await loadFiles(session);
+      await loadVaultItems(session, currentFolderId);
       setNotice({ tone: "success", message: `${file.name} uploaded` });
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
@@ -1097,6 +1143,126 @@ function VaultApp() {
 
     if (droppedFile) {
       void handleUpload(droppedFile);
+    }
+  }
+
+  function openFolder(folder: DisplayFolder) {
+    setFolderTrail((current) => [...current, folder]);
+    setCurrentFolderId(folder.id);
+    setNotice(null);
+  }
+
+  function openRootFolder() {
+    setFolderTrail([]);
+    setCurrentFolderId(null);
+    setNotice(null);
+  }
+
+  function openTrailFolder(index: number) {
+    const nextTrail = folderTrail.slice(0, index + 1);
+    const folder = nextTrail.at(-1) ?? null;
+
+    setFolderTrail(nextTrail);
+    setCurrentFolderId(folder?.id ?? null);
+    setNotice(null);
+  }
+
+  async function handleCreateFolder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!session || fileBusy) return;
+
+    const form = new FormData(event.currentTarget);
+    const name = String(form.get("folder_name") ?? "").trim();
+
+    if (!name) {
+      setNotice({ tone: "error", message: "Folder name is required" });
+      return;
+    }
+
+    setFileBusy(true);
+    setNotice(null);
+
+    try {
+      const { encryptFolderName } = await import("./crypto");
+      const encrypted = await encryptFolderName(name, session.vaultKey);
+
+      await createFolder(
+        session.token,
+        encrypted.encryptedName,
+        encrypted.metadata,
+        currentFolderId
+      );
+      await loadVaultItems(session, currentFolderId);
+      setCreateFolderOpen(false);
+      setNotice({ tone: "success", message: `${name} created` });
+    } catch (error) {
+      setNotice({ tone: "error", message: getErrorMessage(error) });
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
+  async function handleDeleteFolder(folder: DisplayFolder) {
+    if (!session || fileBusy) return;
+
+    const name = folder.name ?? "this encrypted folder";
+
+    if (!window.confirm(`Delete ${name} and everything inside it?`)) {
+      return;
+    }
+
+    setFileBusy(true);
+    setNotice(null);
+
+    try {
+      await deleteFolder(session.token, folder.id);
+      await loadVaultItems(session, currentFolderId);
+      setNotice({ tone: "success", message: `${name} deleted` });
+    } catch (error) {
+      setNotice({ tone: "error", message: getErrorMessage(error) });
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
+  function handleCopyFile(file: DisplayFile) {
+    setFileClipboard({ mode: "copy", file });
+    setNotice({
+      tone: "success",
+      message: `${file.manifest?.name ?? "Encrypted file"} copied`
+    });
+  }
+
+  function handleMoveFile(file: DisplayFile) {
+    setFileClipboard({ mode: "move", file });
+    setNotice({
+      tone: "success",
+      message: `${file.manifest?.name ?? "Encrypted file"} ready to move`
+    });
+  }
+
+  async function handlePasteFile() {
+    if (!session || !fileClipboard || fileBusy) return;
+
+    setFileBusy(true);
+    setNotice(null);
+
+    try {
+      if (fileClipboard.mode === "copy") {
+        await copyFile(session.token, fileClipboard.file.id, currentFolderId);
+        setNotice({ tone: "success", message: "File copied" });
+      } else {
+        await moveFile(session.token, fileClipboard.file.id, currentFolderId);
+        setFileClipboard(null);
+        setNotice({ tone: "success", message: "File moved" });
+      }
+
+      await loadVaultItems(session, currentFolderId);
+    } catch (error) {
+      setNotice({ tone: "error", message: getErrorMessage(error) });
+    } finally {
+      setFileBusy(false);
     }
   }
 
@@ -1147,7 +1313,7 @@ function VaultApp() {
 
     try {
       await deleteFile(session.token, file.id);
-      await loadFiles(session);
+      await loadVaultItems(session, currentFolderId);
       setNotice({ tone: "success", message: `${name} deleted` });
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
@@ -1256,7 +1422,11 @@ function VaultApp() {
     setSession(null);
     setRestoredAuth(null);
     setDeviceUnlockAvailable(false);
+    setFolders([]);
     setFiles([]);
+    setCurrentFolderId(null);
+    setFolderTrail([]);
+    setFileClipboard(null);
     setSecurityOpen(false);
     setShareFile(null);
   }
@@ -1769,8 +1939,8 @@ function VaultApp() {
 
       <section className="status-strip">
         <div>
-          <span>Vault</span>
-          <strong>{files.length}</strong>
+          <span>Items</span>
+          <strong>{totalVisibleItems}</strong>
         </div>
         <div>
           <span>Plaintext size</span>
@@ -1785,18 +1955,44 @@ function VaultApp() {
       <section className="workspace">
         <div className="workspace-header">
           <div>
-            <h1>Vault</h1>
-            <p>{loadingFiles ? "Refreshing" : `${files.length} encrypted item${files.length === 1 ? "" : "s"}`}</p>
+            <h1>{currentFolderName}</h1>
+            <p>{loadingFiles ? "Refreshing" : `${totalVisibleItems} encrypted item${totalVisibleItems === 1 ? "" : "s"}`}</p>
           </div>
-          <button
-            className="primary-button compact"
-            type="button"
-            disabled={fileBusy}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <UploadCloud size={18} />
-            Upload
-          </button>
+          <div className="workspace-actions">
+            {fileClipboard && (
+              <button
+                className="secondary-button compact"
+                type="button"
+                disabled={fileBusy}
+                onClick={() => void handlePasteFile()}
+                title={fileClipboard.mode === "copy" ? "Paste copy" : "Paste move"}
+              >
+                <ClipboardPaste size={18} />
+                Paste
+              </button>
+            )}
+            <button
+              className="secondary-button compact"
+              type="button"
+              disabled={fileBusy}
+              onClick={() => {
+                setCreateFolderOpen(true);
+                setNotice(null);
+              }}
+            >
+              <FolderPlus size={18} />
+              New folder
+            </button>
+            <button
+              className="primary-button compact"
+              type="button"
+              disabled={fileBusy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <UploadCloud size={18} />
+              Upload
+            </button>
+          </div>
           <input
             ref={fileInputRef}
             className="visually-hidden"
@@ -1806,6 +2002,22 @@ function VaultApp() {
         </div>
 
         {notice && !securityOpen && <NoticeBanner notice={notice} />}
+
+        <nav className="vault-breadcrumb" aria-label="Vault location">
+          <button type="button" onClick={openRootFolder} disabled={currentFolderId === null}>
+            Vault
+          </button>
+          {folderTrail.map((folder, index) => (
+            <button
+              key={folder.id}
+              type="button"
+              onClick={() => openTrailFolder(index)}
+              disabled={index === folderTrail.length - 1}
+            >
+              {folder.name ?? "Encrypted folder"}
+            </button>
+          ))}
+        </nav>
 
         {fileBusy && (
           <div className="progress-row" aria-live="polite">
@@ -1841,8 +2053,33 @@ function VaultApp() {
               </tr>
             </thead>
             <tbody>
+              {folders.map((folder) => (
+                <tr key={`folder-${folder.id}`}>
+                  <td>
+                    <button className="folder-name-button" type="button" onClick={() => openFolder(folder)}>
+                      <Folder size={20} />
+                      <div>
+                        <strong>{folder.name ?? "Unreadable encrypted folder"}</strong>
+                        <span>Folder</span>
+                      </div>
+                    </button>
+                  </td>
+                  <td>Folder</td>
+                  <td>{formatDate(folder.created_at)}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button type="button" className="icon-button" title="Open folder" aria-label={`Open ${folder.name ?? "folder"}`} onClick={() => openFolder(folder)} disabled={fileBusy || !folder.name}>
+                        <FolderOpen size={18} />
+                      </button>
+                      <button type="button" className="icon-button danger" title="Delete folder" aria-label={`Delete ${folder.name ?? "folder"}`} onClick={() => void handleDeleteFolder(folder)} disabled={fileBusy}>
+                        <Trash2 size={18} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
               {files.map((file) => (
-                <tr key={file.id}>
+                <tr key={`file-${file.id}`}>
                   <td>
                     <div className="file-name-cell">
                       <FileLock2 size={20} />
@@ -1862,6 +2099,12 @@ function VaultApp() {
                       <button type="button" className="icon-button" title="Share securely" aria-label={`Share ${file.manifest?.name ?? "file"}`} onClick={() => void openShareDialog(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata}>
                         <Share2 size={18} />
                       </button>
+                      <button type="button" className="icon-button" title="Copy file" aria-label={`Copy ${file.manifest?.name ?? "file"}`} onClick={() => handleCopyFile(file)} disabled={fileBusy || !file.manifest}>
+                        <Copy size={18} />
+                      </button>
+                      <button type="button" className="icon-button" title="Move file" aria-label={`Move ${file.manifest?.name ?? "file"}`} onClick={() => handleMoveFile(file)} disabled={fileBusy || !file.manifest}>
+                        <Scissors size={18} />
+                      </button>
                       <button type="button" className="icon-button danger" title="Delete" aria-label={`Delete ${file.manifest?.name ?? "file"}`} onClick={() => void handleDelete(file)} disabled={fileBusy}>
                         <Trash2 size={18} />
                       </button>
@@ -1872,11 +2115,11 @@ function VaultApp() {
             </tbody>
           </table>
 
-          {!loadingFiles && files.length === 0 && (
+          {!loadingFiles && totalVisibleItems === 0 && (
             <div className="empty-state">
               <FolderOpen size={32} />
               <strong>Vault is empty</strong>
-              <span>Your vault is empty.</span>
+              <span>{currentFolderId === null ? "Your vault is empty." : "This folder is empty."}</span>
             </div>
           )}
 
@@ -1888,6 +2131,39 @@ function VaultApp() {
           )}
         </div>
       </section>
+
+      {createFolderOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel folder-panel" role="dialog" aria-modal="true" aria-labelledby="folder-title">
+            <div className="modal-header">
+              <div>
+                <h2 id="folder-title">New folder</h2>
+                <p>{currentFolderName}</p>
+              </div>
+              <button className="icon-button" type="button" onClick={() => {
+                setCreateFolderOpen(false);
+                setNotice(null);
+              }} title="Close" aria-label="Close folder dialog">
+                <X size={19} />
+              </button>
+            </div>
+
+            <form className="folder-form" onSubmit={handleCreateFolder}>
+              <label>
+                Folder name
+                <input name="folder_name" required maxLength={160} autoComplete="off" autoFocus />
+              </label>
+
+              <button className="primary-button" type="submit" disabled={fileBusy}>
+                {fileBusy ? <LoaderCircle className="spin" size={18} /> : <FolderPlus size={18} />}
+                Create folder
+              </button>
+            </form>
+
+            {notice && <NoticeBanner notice={notice} />}
+          </section>
+        </div>
+      )}
 
       {securityOpen && (
         <div className="modal-backdrop" role="presentation">

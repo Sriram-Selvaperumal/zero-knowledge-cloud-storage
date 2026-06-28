@@ -15,6 +15,12 @@ class FileMetadata(Base):
         nullable=False,
         index=True
     )
+    folder_id = Column(
+        Integer,
+        ForeignKey("folder_metadata.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
     encrypted_filename = Column(String(1024), nullable=False)
     storage_key = Column(String(255), unique=True, nullable=False, index=True)
     content_type = Column(String(255), nullable=True)
@@ -29,6 +35,7 @@ class FileMetadata(Base):
     )
 
     owner = relationship("User", back_populates="files")
+    folder = relationship("FolderMetadata", back_populates="files")
     shares = relationship(
         FileShare,
         back_populates="file",

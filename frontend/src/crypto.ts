@@ -4,6 +4,7 @@ import type {
   CompleteCryptoProfile,
   DecryptedManifest,
   FileEncryptionMetadata,
+  FolderEncryptionMetadata,
   PasswordCryptoProfile,
   RecoveryProfile,
   ShareAccessInfo,
@@ -17,6 +18,7 @@ import type {
 const CHUNK_SIZE = 4 * 1024 * 1024;
 const VAULT_KEY_BYTES = 32;
 const FILE_ID_BYTES = 16;
+const FOLDER_ID_BYTES = 16;
 const VAULT_AAD_PREFIX = "cloud-storage:v1:vault:";
 const RECOVERY_AAD_PREFIX = "cloud-storage:v1:recovery:";
 const RECOVERY_KEY_PREFIX = "prototype-recovery-v1:";
@@ -26,6 +28,8 @@ const DEVICE_SECRET_STORAGE_PREFIX = "prototype:vault-device-secret:v1:";
 const FILE_KEY_AAD_PREFIX = "cloud-storage:v1:file-key:";
 const MANIFEST_AAD_PREFIX = "cloud-storage:v1:manifest:";
 const CHUNK_AAD_PREFIX = "cloud-storage:v1:chunk:";
+const FOLDER_KEY_AAD_PREFIX = "cloud-storage:v1:folder-key:";
+const FOLDER_NAME_AAD_PREFIX = "cloud-storage:v1:folder-name:";
 const SHARE_TOKEN_PREFIX = "prototype-share-v1_";
 const SHARE_FILE_KEY_AAD_PREFIX = "cloud-storage:v1:share-file-key:";
 const SHARE_VERIFIER_PREFIX = "cloud-storage:v1:share-verifier:";
@@ -46,6 +50,11 @@ export interface EncryptedFile {
   ciphertext: Blob;
   encryptedFilename: string;
   metadata: FileEncryptionMetadata;
+}
+
+export interface EncryptedFolderName {
+  encryptedName: string;
+  metadata: FolderEncryptionMetadata;
 }
 
 export interface DecryptedFile {
@@ -116,6 +125,16 @@ function manifestAad(fileId: string): string {
 
 function chunkAad(fileId: string, index: number): string {
   return `${CHUNK_AAD_PREFIX}${fileId}:${index}`;
+}
+
+
+function folderKeyAad(folderId: string): string {
+  return `${FOLDER_KEY_AAD_PREFIX}${folderId}`;
+}
+
+
+function folderNameAad(folderId: string): string {
+  return `${FOLDER_NAME_AAD_PREFIX}${folderId}`;
 }
 
 
@@ -586,6 +605,20 @@ function unwrapFileKey(
 }
 
 
+function unwrapFolderKey(
+  metadata: FolderEncryptionMetadata,
+  vaultKey: Uint8Array
+): Uint8Array {
+  return sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+    null,
+    fromBase64(metadata.wrapped_folder_key),
+    folderKeyAad(metadata.folder_id),
+    fromBase64(metadata.wrapped_folder_key_nonce),
+    vaultKey
+  );
+}
+
+
 function unwrapSharedFileKey(
   metadata: SharedFileEncryptionMetadata,
   envelope: ShareKeyEnvelope,
@@ -767,6 +800,103 @@ export async function decryptManifest(
     return decryptManifestWithKey(encryptedFilename, metadata, fileKey);
   } finally {
     sodium.memzero(fileKey);
+  }
+}
+
+
+export async function encryptFolderName(
+  name: string,
+  vaultKey: Uint8Array
+): Promise<EncryptedFolderName> {
+  await ready();
+
+  const normalizedName = name.trim();
+
+  if (!normalizedName) {
+    throw new Error("Folder name is required");
+  }
+
+  if (normalizedName.length > 160) {
+    throw new Error("Folder name is too long");
+  }
+
+  const folderKey = sodium.randombytes_buf(VAULT_KEY_BYTES);
+  const folderId = toBase64(sodium.randombytes_buf(FOLDER_ID_BYTES));
+  const wrappedFolderKeyNonce = sodium.randombytes_buf(
+    sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
+  );
+  const nameNonce = sodium.randombytes_buf(
+    sodium.crypto_aead_xchacha20poly1305_ietf_NPUBBYTES
+  );
+
+  try {
+    const wrappedFolderKey = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+      folderKey,
+      folderKeyAad(folderId),
+      null,
+      wrappedFolderKeyNonce,
+      vaultKey
+    );
+    const encryptedName = sodium.crypto_aead_xchacha20poly1305_ietf_encrypt(
+      sodium.from_string(JSON.stringify({ name: normalizedName })),
+      folderNameAad(folderId),
+      null,
+      nameNonce,
+      folderKey
+    );
+
+    return {
+      encryptedName: toBase64(encryptedName),
+      metadata: {
+        version: 1,
+        cipher: "xchacha20-poly1305-folder",
+        folder_id: folderId,
+        wrapped_folder_key: toBase64(wrappedFolderKey),
+        wrapped_folder_key_nonce: toBase64(wrappedFolderKeyNonce),
+        name_nonce: toBase64(nameNonce)
+      }
+    };
+  } finally {
+    sodium.memzero(folderKey);
+  }
+}
+
+
+export async function decryptFolderName(
+  encryptedName: string,
+  metadata: FolderEncryptionMetadata,
+  vaultKey: Uint8Array
+): Promise<string> {
+  await ready();
+
+  if (
+    metadata.version !== 1
+    || metadata.cipher !== "xchacha20-poly1305-folder"
+  ) {
+    throw new Error("Unsupported encrypted folder format");
+  }
+
+  const folderKey = unwrapFolderKey(metadata, vaultKey);
+
+  try {
+    const plaintext = sodium.crypto_aead_xchacha20poly1305_ietf_decrypt(
+      null,
+      fromBase64(encryptedName),
+      folderNameAad(metadata.folder_id),
+      fromBase64(metadata.name_nonce),
+      folderKey
+    );
+    const manifest = JSON.parse(sodium.to_string(plaintext)) as {
+      name?: unknown;
+    };
+
+    if (!manifest.name || typeof manifest.name !== "string") {
+      throw new Error("Invalid encrypted folder name");
+    }
+
+    return manifest.name;
+  } finally {
+    sodium.memzero(folderKey);
   }
 }
 

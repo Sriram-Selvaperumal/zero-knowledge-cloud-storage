@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routes.auth import router as auth_router
 from app.routes.files import router as files_router
+from app.routes.folders import router as folders_router
 from app.routes.shares import router as shares_router
 
 app = FastAPI(
@@ -21,6 +22,7 @@ app.add_middleware(
 
 app.include_router(auth_router, prefix=settings.api_prefix)
 app.include_router(files_router, prefix=settings.api_prefix)
+app.include_router(folders_router, prefix=settings.api_prefix)
 app.include_router(shares_router, prefix=settings.api_prefix)
 
 
