@@ -34,6 +34,121 @@ button:disabled {
   opacity: 0.55;
 }
 
+.home-shell {
+  min-height: 100vh;
+  background: #f4f6f7;
+}
+
+.home-topbar {
+  min-height: 68px;
+  padding: 0 clamp(18px, 4vw, 52px);
+  border-bottom: 1px solid #dce3e5;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.home-account {
+  color: #66747b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.home-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.product-workspace {
+  width: min(100% - 36px, 1180px);
+  margin: 0 auto;
+  padding: 34px 0 52px;
+}
+
+.product-heading {
+  margin-bottom: 22px;
+}
+
+.section-label {
+  display: block;
+  margin-bottom: 8px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.product-heading h1 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: 0;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 340px));
+  gap: 16px;
+}
+
+.product-card {
+  min-height: 146px;
+  padding: 18px;
+  border: 1px solid #d7e0e2;
+  border-radius: 8px;
+  color: #182126;
+  background: #ffffff;
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+}
+
+.product-card:hover {
+  border-color: #8ab9b4;
+  box-shadow: 0 12px 28px rgba(24, 33, 38, 0.08);
+}
+
+.product-icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  color: #0f766e;
+  background: #eaf5f3;
+  display: grid;
+  place-items: center;
+}
+
+.product-card h2,
+.product-card p {
+  margin: 0;
+}
+
+.product-card h2 {
+  margin-bottom: 5px;
+  font-size: 20px;
+}
+
+.product-card p {
+  color: #66747b;
+  font-size: 13px;
+}
+
+.product-status {
+  grid-column: 2;
+  width: fit-content;
+  padding: 5px 8px;
+  border: 1px solid #bdd8d5;
+  border-radius: 6px;
+  color: #17613d;
+  background: #edf8f1;
+  font-size: 12px;
+  font-weight: 750;
+}
+
 .auth-shell {
   min-height: 100vh;
   display: grid;
@@ -56,6 +171,18 @@ button:disabled {
   gap: 11px;
   font-size: 18px;
   font-weight: 750;
+}
+
+.brand-home-button {
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+}
+
+.brand-home-button:hover {
+  color: inherit;
 }
 
 .brand-mark {
@@ -647,6 +774,10 @@ button:disabled {
   color: #182126;
 }
 
+.light-text {
+  color: #f8faf9;
+}
+
 .account-area {
   display: flex;
   align-items: center;
@@ -949,6 +1080,32 @@ button:disabled {
 }
 
 @media (max-width: 760px) {
+  .home-topbar {
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    padding-block: 16px;
+  }
+
+  .home-account .account-copy {
+    text-align: left;
+  }
+
+  .home-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .product-workspace {
+    width: min(100% - 28px, 1180px);
+    padding-top: 28px;
+  }
+
+  .product-grid {
+    grid-template-columns: 1fr;
+  }
+
   .auth-shell {
     grid-template-columns: 1fr;
   }

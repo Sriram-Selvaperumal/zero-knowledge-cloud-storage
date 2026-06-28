@@ -18,7 +18,7 @@ import type {
 
 function getDefaultApiUrl(): string {
   // In development the Vite proxy forwards /api to the backend, so browser
-  // page routes such as /files never collide with API routes.
+  // page routes such as /vault never collide with API routes.
   if (import.meta.env.DEV) {
     return "/api";
   }

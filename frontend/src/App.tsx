@@ -109,10 +109,14 @@ interface PendingPasswordRecovery {
 }
 
 type RecoveryStage = "request" | "otp" | "complete";
-type VaultRoute = "auth" | "files";
+type AppRoute = "home" | "vault";
 
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
-const MANUAL_LOCK_STORAGE_KEY = "prototype:manual-file-lock";
+const HOME_PATH = "/";
+const VAULT_PATH = "/vault";
+const LEGACY_FILES_PATH = "/files";
+const MANUAL_LOCK_STORAGE_KEY = "prototype:manual-vault-lock";
+const LEGACY_MANUAL_LOCK_STORAGE_KEY = "prototype:manual-file-lock";
 
 
 function formatBytes(bytes: number): string {
@@ -159,15 +163,26 @@ function getShareTokenFromLocation(): string | null {
 }
 
 
-function getVaultRouteFromLocation(): VaultRoute {
+function getAppRouteFromLocation(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, "") || "/";
 
-  return path === "/files" ? "files" : "auth";
+  return (
+    path === VAULT_PATH || path === LEGACY_FILES_PATH
+      ? "vault"
+      : "home"
+  );
 }
 
 
-function vaultRoutePath(route: VaultRoute): string {
-  return route === "files" ? "/files" : "/";
+function appRoutePath(route: AppRoute): string {
+  return route === "vault" ? VAULT_PATH : HOME_PATH;
+}
+
+
+function isLegacyFilesRoute(): boolean {
+  return (window.location.pathname.replace(/\/+$/, "") || "/") === (
+    LEGACY_FILES_PATH
+  );
 }
 
 
@@ -177,8 +192,87 @@ export default function App() {
 }
 
 
+function ProductHome({
+  checkingStoredSession,
+  onRegister,
+  onSignIn,
+  restoredAuth,
+  session,
+  onOpenVault
+}: {
+  checkingStoredSession: boolean;
+  onRegister: () => void;
+  onSignIn: () => void;
+  restoredAuth: RestoredAuth | null;
+  session: Session | null;
+  onOpenVault: () => void;
+}) {
+  const activeUser = session?.user ?? restoredAuth?.user ?? null;
+
+  return (
+    <main className="home-shell">
+      <header className="home-topbar">
+        <div className="brand-lockup dark-text">
+          <div className="brand-mark"><LockKeyhole size={21} /></div>
+          <span>Prototype</span>
+        </div>
+
+        <div className="home-account">
+          {activeUser ? (
+            <div className="account-copy">
+              <strong>{activeUser.username}</strong>
+              <span>{activeUser.email}</span>
+            </div>
+          ) : checkingStoredSession ? (
+            <span>Checking session</span>
+          ) : (
+            <div className="home-actions">
+              <button className="secondary-button" type="button" onClick={onSignIn}>
+                Sign in
+              </button>
+              <button className="primary-button compact" type="button" onClick={onRegister}>
+                Register
+              </button>
+            </div>
+          )}
+        </div>
+      </header>
+
+      <section className="product-workspace">
+        <div className="product-heading">
+          <span className="section-label">Products</span>
+          <h1>Prototype</h1>
+        </div>
+
+        <div className="product-grid" aria-label="Available products">
+          <button className="product-card" type="button" onClick={onOpenVault}>
+            <div className="product-icon">
+              <FileLock2 size={28} />
+            </div>
+            <div>
+              <h2>Vault</h2>
+              <p>End-to-end encrypted storage</p>
+            </div>
+            <span className="product-status">
+              {session
+                ? "Unlocked"
+                : restoredAuth
+                  ? "Locked"
+                  : "Open"}
+            </span>
+          </button>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+
 function VaultApp() {
-  const [route, setRoute] = useState<VaultRoute>(getVaultRouteFromLocation);
+  const [route, setRoute] = useState<AppRoute>(getAppRouteFromLocation);
+  const [authReturnRoute, setAuthReturnRoute] = useState<AppRoute>(
+    getAppRouteFromLocation() === "vault" ? "vault" : "home"
+  );
   const [authMode, setAuthMode] = useState<"login" | "register">(
     () => {
       const stored = sessionStorage.getItem("zkcs:authMode");
@@ -186,8 +280,8 @@ function VaultApp() {
     }
   );
 
-  const navigateTo = useCallback((nextRoute: VaultRoute, replace = false) => {
-    const nextPath = vaultRoutePath(nextRoute);
+  const navigateTo = useCallback((nextRoute: AppRoute, replace = false) => {
+    const nextPath = appRoutePath(nextRoute);
 
     setRoute(nextRoute);
 
@@ -205,12 +299,18 @@ function VaultApp() {
 
   useEffect(() => {
     const handlePopState = () => {
-      setRoute(getVaultRouteFromLocation());
+      setRoute(getAppRouteFromLocation());
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (isLegacyFilesRoute()) {
+      navigateTo("vault", true);
+    }
+  }, [navigateTo]);
 
   // Keep sessionStorage in sync whenever authMode changes
   useEffect(() => {
@@ -219,6 +319,7 @@ function VaultApp() {
 
   useEffect(() => {
     sessionStorage.removeItem("zkcs:vaultKey");
+    sessionStorage.removeItem(LEGACY_MANUAL_LOCK_STORAGE_KEY);
   }, []);
 
   const [session, setSession] = useState<Session | null>(null);
@@ -362,12 +463,12 @@ function VaultApp() {
 
         if (cancelled) return;
 
-        const shouldAutoUnlockFiles = (
-          getVaultRouteFromLocation() === "files"
+        const shouldAutoUnlockVault = (
+          getAppRouteFromLocation() === "vault"
           && sessionStorage.getItem(MANUAL_LOCK_STORAGE_KEY) !== "1"
         );
 
-        if (shouldAutoUnlockFiles && hasLocalDeviceVault(user.id)) {
+        if (shouldAutoUnlockVault && hasLocalDeviceVault(user.id)) {
           try {
             const vaultKey = await unlockVaultWithLocalDevice(user.id);
 
@@ -415,6 +516,60 @@ function VaultApp() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function unlockTrustedVaultRoute() {
+      if (
+        route !== "vault"
+        || session
+        || !restoredAuth
+        || sessionStorage.getItem(MANUAL_LOCK_STORAGE_KEY) === "1"
+      ) {
+        return;
+      }
+
+      const {
+        hasLocalDeviceVault,
+        unlockVaultWithLocalDevice,
+        zeroKey
+      } = await import("./crypto");
+
+      if (!hasLocalDeviceVault(restoredAuth.user.id)) {
+        return;
+      }
+
+      try {
+        const vaultKey = await unlockVaultWithLocalDevice(
+          restoredAuth.user.id
+        );
+
+        if (cancelled) {
+          await zeroKey(vaultKey);
+          return;
+        }
+
+        sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
+        setSession({
+          token: restoredAuth.token,
+          user: restoredAuth.user,
+          vaultKey
+        });
+        setRestoredAuth(null);
+        setDeviceUnlockAvailable(true);
+        setNotice(null);
+      } catch {
+        setDeviceUnlockAvailable(false);
+      }
+    }
+
+    void unlockTrustedVaultRoute();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [restoredAuth, route, session]);
+
   const totalPlaintextBytes = useMemo(
     () => files.reduce(
       (total, file) => total + (
@@ -429,6 +584,7 @@ function VaultApp() {
     token: string,
     user: User,
     password: string,
+    nextRoute: AppRoute = "vault"
   ) {
     let vaultKey: Uint8Array;
     let recoveryKey: string | null = null;
@@ -490,19 +646,20 @@ function VaultApp() {
     setDeviceUnlockAvailable(hasLocalDeviceVault(user.id));
     setRecoveryKeyToSave(recoveryKey);
     setNotice({ tone: "success", message: "Vault unlocked" });
-    navigateTo("files");
+    navigateTo(nextRoute);
   }
 
   async function establishSession(
     username: string,
     password: string,
-    registeredUser?: User
+    registeredUser?: User,
+    nextRoute: AppRoute = "vault"
   ) {
     const tokenResponse = await login(username, password);
     const token = tokenResponse.access_token;
     const user = registeredUser ?? await getCurrentUser(token);
 
-    await unlockVaultSession(token, user, password);
+    await unlockVaultSession(token, user, password, nextRoute);
   }
 
   async function handleAuthentication(event: FormEvent<HTMLFormElement>) {
@@ -537,7 +694,7 @@ function VaultApp() {
         return;
       }
 
-      await establishSession(username, password);
+      await establishSession(username, password, undefined, authReturnRoute);
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
     } finally {
@@ -556,7 +713,12 @@ function VaultApp() {
     const password = String(form.get("password") ?? "");
 
     try {
-      await unlockVaultSession(restoredAuth.token, restoredAuth.user, password);
+      await unlockVaultSession(
+        restoredAuth.token,
+        restoredAuth.user,
+        password,
+        authReturnRoute
+      );
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
     } finally {
@@ -578,7 +740,7 @@ function VaultApp() {
       setRestoredAuth(null);
       setDeviceUnlockAvailable(false);
       setAuthMode("login");
-      navigateTo("auth");
+      navigateTo("vault");
       setAuthBusy(false);
     }
   }
@@ -603,7 +765,8 @@ function VaultApp() {
       await establishSession(
         pendingRegistration.username,
         pendingRegistration.password,
-        user
+        user,
+        authReturnRoute
       );
       setPendingRegistration(null);
     } catch (error) {
@@ -754,7 +917,7 @@ function VaultApp() {
       setPendingPasswordRecovery(null);
       setPasswordRecoveryGrant(null);
       setNotice({ tone: "success", message: "Password recovered" });
-      navigateTo("files");
+      navigateTo(authReturnRoute);
     } catch (error) {
       setNotice({ tone: "error", message: getErrorMessage(error) });
     } finally {
@@ -1113,7 +1276,7 @@ function VaultApp() {
     await clearLocalSession(activeSession);
     setRestoredAuth(restoredSession);
     setDeviceUnlockAvailable(hasDeviceUnlock);
-    navigateTo("files");
+    navigateTo("vault");
     setNotice(null);
   }
 
@@ -1135,7 +1298,7 @@ function VaultApp() {
     } finally {
       await clearLocalSession(activeSession);
       sessionStorage.removeItem(MANUAL_LOCK_STORAGE_KEY);
-      navigateTo("auth");
+      navigateTo("home");
       setNotice(null);
     }
   }
@@ -1199,6 +1362,20 @@ function VaultApp() {
     );
   }
 
+  function openVaultAuthentication(
+    mode: "login" | "register",
+    returnRoute: AppRoute = "home"
+  ) {
+    setAuthReturnRoute(returnRoute);
+    setAuthMode(mode);
+    setPendingRegistration(null);
+    setRecoveryStage(null);
+    setPendingPasswordRecovery(null);
+    setPasswordRecoveryGrant(null);
+    setNotice(null);
+    navigateTo("vault");
+  }
+
   const showRestoredUnlock = Boolean(
     restoredAuth && !pendingRegistration && !recoveryStage
   );
@@ -1220,7 +1397,7 @@ function VaultApp() {
   const authDescription = checkingStoredSession
     ? "Looking for an active session"
     : restoredAuth && showRestoredUnlock
-      ? `Signed in as ${restoredAuth.user.username}. Enter your password to decrypt files.`
+      ? `Signed in as ${restoredAuth.user.username}. Enter your password to decrypt Vault.`
       : recoveryStage === "request"
         ? "Request a recovery code"
         : recoveryStage === "otp" && pendingPasswordRecovery
@@ -1232,21 +1409,37 @@ function VaultApp() {
               : authMode === "login"
                 ? "Enter your vault credentials"
                 : "Set your vault credentials";
-  const shouldRenderLockedFilesRoute = (
-    route === "files"
+  if (route === "home") {
+    return (
+      <ProductHome
+        checkingStoredSession={checkingStoredSession}
+        onRegister={() => openVaultAuthentication("register", "home")}
+        onSignIn={() => openVaultAuthentication("login", "home")}
+        restoredAuth={restoredAuth}
+        session={session}
+        onOpenVault={() => {
+          setAuthReturnRoute("vault");
+          navigateTo("vault");
+        }}
+      />
+    );
+  }
+
+  const shouldRenderLockedVaultRoute = (
+    route === "vault"
     && !pendingRegistration
     && !recoveryStage
     && (checkingStoredSession || Boolean(restoredAuth))
   );
 
-  if (!session && shouldRenderLockedFilesRoute) {
+  if (!session && shouldRenderLockedVaultRoute) {
     return (
       <main className="app-shell">
         <header className="topbar">
-          <div className="brand-lockup dark-text">
+          <button className="brand-lockup brand-home-button dark-text" type="button" onClick={() => navigateTo("home")}>
             <div className="brand-mark"><LockKeyhole size={21} /></div>
             <span>Prototype</span>
-          </div>
+          </button>
 
           {restoredAuth && (
             <div className="account-area">
@@ -1260,7 +1453,7 @@ function VaultApp() {
 
         <section className="status-strip">
           <div>
-            <span>Files</span>
+            <span>Vault</span>
             <strong>Locked</strong>
           </div>
           <div>
@@ -1280,7 +1473,7 @@ function VaultApp() {
         <section className="workspace locked-workspace">
           <div className="workspace-header">
             <div>
-              <h1>Files</h1>
+              <h1>Vault</h1>
               <p>
                 {checkingStoredSession
                   ? "Checking saved session"
@@ -1315,10 +1508,10 @@ function VaultApp() {
     return (
       <main className="auth-shell">
         <section className="auth-brand" aria-label="Prototype">
-          <div className="brand-lockup">
+          <button className="brand-lockup brand-home-button light-text" type="button" onClick={() => navigateTo("home")}>
             <div className="brand-mark"><LockKeyhole size={24} /></div>
             <span>Prototype</span>
-          </div>
+          </button>
           <div className="auth-state">
             <ShieldCheck size={34} />
             <h1>Your private vault</h1>
@@ -1552,10 +1745,10 @@ function VaultApp() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-lockup dark-text">
+        <button className="brand-lockup brand-home-button dark-text" type="button" onClick={() => navigateTo("home")}>
           <div className="brand-mark"><LockKeyhole size={21} /></div>
           <span>Prototype</span>
-        </div>
+        </button>
 
         <div className="account-area">
           <div className="account-copy">
@@ -1568,7 +1761,7 @@ function VaultApp() {
           }} title="Account security" aria-label="Account security">
             <Settings size={19} />
           </button>
-          <button className="icon-button" type="button" onClick={() => void handleLockVault()} title="Lock files" aria-label="Lock files">
+          <button className="icon-button" type="button" onClick={() => void handleLockVault()} title="Lock Vault" aria-label="Lock Vault">
             <LogOut size={19} />
           </button>
         </div>
@@ -1576,7 +1769,7 @@ function VaultApp() {
 
       <section className="status-strip">
         <div>
-          <span>Files</span>
+          <span>Vault</span>
           <strong>{files.length}</strong>
         </div>
         <div>
@@ -1592,7 +1785,7 @@ function VaultApp() {
       <section className="workspace">
         <div className="workspace-header">
           <div>
-            <h1>Files</h1>
+            <h1>Vault</h1>
             <p>{loadingFiles ? "Refreshing" : `${files.length} encrypted item${files.length === 1 ? "" : "s"}`}</p>
           </div>
           <button
@@ -1682,7 +1875,7 @@ function VaultApp() {
           {!loadingFiles && files.length === 0 && (
             <div className="empty-state">
               <FolderOpen size={32} />
-              <strong>No files</strong>
+              <strong>Vault is empty</strong>
               <span>Your vault is empty.</span>
             </div>
           )}
@@ -1735,7 +1928,7 @@ function VaultApp() {
             <div className="security-section">
               <div>
                 <h3>Trusted device</h3>
-                <p>{deviceUnlockAvailable ? "Files can reopen after refresh on this browser." : "This browser is not remembered."}</p>
+                <p>{deviceUnlockAvailable ? "Vault can reopen after refresh on this browser." : "This browser is not remembered."}</p>
               </div>
               {deviceUnlockAvailable && (
                 <button className="secondary-button danger-command" type="button" onClick={() => void handleTrustedDeviceRemoval()} disabled={authBusy}>
@@ -1863,7 +2056,7 @@ function VaultApp() {
             <div className="modal-header">
               <div>
                 <h2 id="recovery-key-title">Save your recovery key</h2>
-                <p>This is the only way to recover encrypted files after a forgotten password.</p>
+                <p>This is the only way to recover encrypted Vault data after a forgotten password.</p>
               </div>
               <ShieldCheck size={24} />
             </div>

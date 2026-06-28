@@ -4,6 +4,9 @@ Self-hosted zero-knowledge cloud storage prototype built with FastAPI,
 PostgreSQL, React, and client-side authenticated encryption. The server stores
 ciphertext, encrypted manifests, and wrapped keys only.
 
+The client opens to a product home page at `/`. The current product is Vault,
+available at `/vault`, for end-to-end encrypted storage of any file type.
+
 ## Setup
 
 Create a virtual environment, then install runtime and development packages:
@@ -124,6 +127,7 @@ npm.cmd run dev
 ```
 
 The client is available at `http://127.0.0.1:5173`.
+Vault is available at `http://127.0.0.1:5173/vault`.
 
 ## End-To-End Encryption Protocol
 
