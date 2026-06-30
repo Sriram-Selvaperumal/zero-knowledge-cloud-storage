@@ -920,6 +920,35 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+.view-controls {
+  min-height: 38px;
+  padding: 3px;
+  border: 1px solid #cbd6d9;
+  border-radius: 7px;
+  background: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.view-controls button {
+  width: 32px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: #4b5c63;
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+
+.view-controls button:hover:not(:disabled),
+.view-controls button.active {
+  color: #0f766e;
+  background: #eaf5f3;
+}
+
 .vault-breadcrumb {
   min-height: 38px;
   margin: -4px 0 16px;
@@ -1001,7 +1030,7 @@ button:disabled {
   transition: width 160ms ease;
 }
 
-.file-table-wrap {
+.vault-browser {
   min-height: 290px;
   overflow: hidden;
   border: 1px solid #d7e0e2;
@@ -1079,9 +1108,56 @@ button:disabled {
   color: #0f766e;
 }
 
-.file-name-cell > svg,
-.folder-name-button > svg {
-  min-width: 20px;
+.file-visual {
+  flex: 0 0 auto;
+  border: 1px solid #d8e3e5;
+  border-radius: 7px;
+  color: #0f766e;
+  background: #eff8f7;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.file-visual-list {
+  width: 36px;
+  height: 36px;
+}
+
+.file-visual-small {
+  width: 54px;
+  height: 54px;
+}
+
+.file-visual-medium {
+  width: 86px;
+  height: 86px;
+}
+
+.file-visual-large {
+  width: 132px;
+  height: 132px;
+}
+
+.folder-visual {
+  color: #0f766e;
+  background: #eaf5f3;
+}
+
+.image-visual {
+  color: #507078;
+  background: #edf2f2;
+}
+
+.image-visual img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.file-name-cell > .file-visual,
+.folder-name-button > .file-visual {
   color: #0f766e;
 }
 
@@ -1117,6 +1193,146 @@ button:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 7px;
+}
+
+.vault-grid {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.vault-view-small .vault-grid {
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+}
+
+.vault-view-medium .vault-grid {
+  grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
+}
+
+.vault-view-large .vault-grid {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.vault-card {
+  min-width: 0;
+  min-height: 156px;
+  padding: 12px;
+  border: 1px solid #e1e8ea;
+  border-radius: 7px;
+  background: #ffffff;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.vault-view-medium .vault-card {
+  min-height: 190px;
+}
+
+.vault-view-large .vault-card {
+  min-height: 248px;
+}
+
+.vault-card:hover {
+  border-color: #a9c8c4;
+  box-shadow: 0 10px 22px rgba(24, 33, 38, 0.07);
+}
+
+.vault-card-main {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 8px;
+  text-align: center;
+}
+
+.vault-card-main:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.vault-card-main:not(:disabled):hover strong {
+  color: #0f766e;
+}
+
+.vault-card-main strong,
+.vault-card-main span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-card-main strong {
+  color: #26373e;
+  font-size: 13px;
+}
+
+.vault-card-main span {
+  color: #718087;
+  font-size: 12px;
+}
+
+.card-actions {
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.image-preview-backdrop {
+  z-index: 20;
+}
+
+.image-preview-panel {
+  width: min(100%, 980px);
+}
+
+.image-preview-stage {
+  min-height: min(62vh, 640px);
+  border: 1px solid #d7e0e2;
+  border-radius: 7px;
+  background: #101719;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.image-preview-stage img {
+  max-width: 100%;
+  max-height: min(62vh, 640px);
+  display: block;
+  object-fit: contain;
+}
+
+.image-preview-state {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  color: #dbe7e8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.image-preview-state.error-state {
+  max-width: 420px;
+  padding: 24px;
+  color: #ffd7d7;
+  text-align: center;
+}
+
+.image-preview-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+a.secondary-button {
+  text-decoration: none;
 }
 
 .empty-state {

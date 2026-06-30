@@ -6,16 +6,27 @@ import {
   ClipboardPaste,
   Copy,
   Download,
+  Eye,
+  File as FileIcon,
+  FileArchive,
+  FileCode,
+  FileImage,
   FileLock2,
+  FileText,
   Folder,
   FolderPlus,
   FolderOpen,
+  Grid2x2,
+  Grid3x3,
+  LayoutGrid,
+  List,
   KeyRound,
   Link2,
   LoaderCircle,
   LockKeyhole,
   LogOut,
   MailCheck,
+  Music,
   RotateCw,
   Settings,
   Share2,
@@ -23,6 +34,7 @@ import {
   Scissors,
   Trash2,
   UploadCloud,
+  Video,
   X
 } from "lucide-react";
 import {
@@ -125,6 +137,7 @@ interface PendingPasswordRecovery {
 
 type RecoveryStage = "request" | "otp" | "complete";
 type AppRoute = "home" | "vault";
+type VaultViewMode = "list" | "small" | "medium" | "large";
 
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
 const HOME_PATH = "/";
@@ -132,6 +145,7 @@ const VAULT_PATH = "/vault";
 const LEGACY_FILES_PATH = "/files";
 const MANUAL_LOCK_STORAGE_KEY = "prototype:manual-vault-lock";
 const LEGACY_MANUAL_LOCK_STORAGE_KEY = "prototype:manual-file-lock";
+const VAULT_VIEW_MODE_STORAGE_KEY = "prototype:vault-view-mode";
 
 
 function formatBytes(bytes: number): string {
@@ -198,6 +212,87 @@ function isLegacyFilesRoute(): boolean {
   return (window.location.pathname.replace(/\/+$/, "") || "/") === (
     LEGACY_FILES_PATH
   );
+}
+
+
+function getStoredVaultViewMode(): VaultViewMode {
+  if (typeof localStorage === "undefined") {
+    return "list";
+  }
+
+  const stored = localStorage.getItem(VAULT_VIEW_MODE_STORAGE_KEY);
+
+  return (
+    stored === "small"
+    || stored === "medium"
+    || stored === "large"
+    || stored === "list"
+  ) ? stored : "list";
+}
+
+
+function isImageFile(file: DisplayFile): boolean {
+  const type = file.manifest?.type.toLowerCase() ?? "";
+  const name = file.manifest?.name.toLowerCase() ?? "";
+
+  return (
+    type.startsWith("image/")
+    || /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(name)
+  );
+}
+
+
+function getFileTypeLabel(file: DisplayFile): string {
+  const type = file.manifest?.type.toLowerCase() ?? "";
+  const name = file.manifest?.name.toLowerCase() ?? "";
+
+  if (isImageFile(file)) return "Image";
+  if (type.includes("pdf") || name.endsWith(".pdf")) return "PDF";
+  if (type.startsWith("video/")) return "Video";
+  if (type.startsWith("audio/")) return "Audio";
+  if (
+    type.includes("zip")
+    || type.includes("compressed")
+    || /\.(7z|gz|rar|tar|zip)$/i.test(name)
+  ) {
+    return "Archive";
+  }
+  if (
+    type.startsWith("text/")
+    || /\.(css|csv|html|js|json|md|py|sql|ts|tsx|txt|xml|yaml|yml)$/i.test(name)
+  ) {
+    return "Text";
+  }
+
+  return file.manifest?.type ?? "Encrypted file";
+}
+
+
+function renderFileTypeIcon(file: DisplayFile, size: number) {
+  const type = file.manifest?.type.toLowerCase() ?? "";
+  const name = file.manifest?.name.toLowerCase() ?? "";
+
+  if (isImageFile(file)) return <FileImage size={size} />;
+  if (type.includes("pdf") || name.endsWith(".pdf")) {
+    return <FileText size={size} />;
+  }
+  if (type.startsWith("video/")) return <Video size={size} />;
+  if (type.startsWith("audio/")) return <Music size={size} />;
+  if (
+    type.includes("zip")
+    || type.includes("compressed")
+    || /\.(7z|gz|rar|tar|zip)$/i.test(name)
+  ) {
+    return <FileArchive size={size} />;
+  }
+  if (
+    type.startsWith("text/")
+    || /\.(css|html|js|json|md|py|sql|ts|tsx|xml|yaml|yml)$/i.test(name)
+  ) {
+    return <FileCode size={size} />;
+  }
+
+  return <FileIcon size={size} />;
 }
 
 
@@ -350,6 +445,10 @@ function VaultApp() {
   const [fileClipboard, setFileClipboard] = useState<FileClipboard | null>(
     null
   );
+  const [vaultViewMode, setVaultViewMode] = useState<VaultViewMode>(
+    getStoredVaultViewMode
+  );
+  const [previewFile, setPreviewFile] = useState<DisplayFile | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -436,6 +535,10 @@ function VaultApp() {
       void loadVaultItems(session, currentFolderId);
     }
   }, [currentFolderId, loadVaultItems, session]);
+
+  useEffect(() => {
+    localStorage.setItem(VAULT_VIEW_MODE_STORAGE_KEY, vaultViewMode);
+  }, [vaultViewMode]);
 
   useEffect(() => {
     if (!pendingRegistration || pendingRegistration.resendAfterSeconds <= 0) {
@@ -1266,6 +1369,13 @@ function VaultApp() {
     }
   }
 
+  function openImagePreview(file: DisplayFile) {
+    if (!session || !file.encryption_metadata || !isImageFile(file)) return;
+
+    setPreviewFile(file);
+    setNotice(null);
+  }
+
   async function handleDownload(file: DisplayFile) {
     if (!session || fileBusy || !file.encryption_metadata) return;
 
@@ -1429,6 +1539,7 @@ function VaultApp() {
     setFileClipboard(null);
     setSecurityOpen(false);
     setShareFile(null);
+    setPreviewFile(null);
   }
 
   async function handleLockVault() {
@@ -1959,6 +2070,44 @@ function VaultApp() {
             <p>{loadingFiles ? "Refreshing" : `${totalVisibleItems} encrypted item${totalVisibleItems === 1 ? "" : "s"}`}</p>
           </div>
           <div className="workspace-actions">
+            <div className="view-controls" role="group" aria-label="Vault view">
+              <button
+                className={vaultViewMode === "list" ? "active" : ""}
+                type="button"
+                onClick={() => setVaultViewMode("list")}
+                title="List view"
+                aria-label="List view"
+              >
+                <List size={17} />
+              </button>
+              <button
+                className={vaultViewMode === "small" ? "active" : ""}
+                type="button"
+                onClick={() => setVaultViewMode("small")}
+                title="Small icons"
+                aria-label="Small icon view"
+              >
+                <Grid2x2 size={15} />
+              </button>
+              <button
+                className={vaultViewMode === "medium" ? "active" : ""}
+                type="button"
+                onClick={() => setVaultViewMode("medium")}
+                title="Medium icons"
+                aria-label="Medium icon view"
+              >
+                <LayoutGrid size={18} />
+              </button>
+              <button
+                className={vaultViewMode === "large" ? "active" : ""}
+                type="button"
+                onClick={() => setVaultViewMode("large")}
+                title="Big icons"
+                aria-label="Big icon view"
+              >
+                <Grid3x3 size={21} />
+              </button>
+            </div>
             {fileClipboard && (
               <button
                 className="secondary-button compact"
@@ -2042,78 +2191,136 @@ function VaultApp() {
           </button>
         </div>
 
-        <div className="file-table-wrap">
-          <table className="file-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Size</th>
-                <th>Added</th>
-                <th><span className="visually-hidden">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {folders.map((folder) => (
-                <tr key={`folder-${folder.id}`}>
-                  <td>
-                    <button className="folder-name-button" type="button" onClick={() => openFolder(folder)}>
-                      <Folder size={20} />
-                      <div>
-                        <strong>{folder.name ?? "Unreadable encrypted folder"}</strong>
-                        <span>Folder</span>
-                      </div>
-                    </button>
-                  </td>
-                  <td>Folder</td>
-                  <td>{formatDate(folder.created_at)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button type="button" className="icon-button" title="Open folder" aria-label={`Open ${folder.name ?? "folder"}`} onClick={() => openFolder(folder)} disabled={fileBusy || !folder.name}>
-                        <FolderOpen size={18} />
-                      </button>
-                      <button type="button" className="icon-button danger" title="Delete folder" aria-label={`Delete ${folder.name ?? "folder"}`} onClick={() => void handleDeleteFolder(folder)} disabled={fileBusy}>
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
+        <div className={`vault-browser vault-view-${vaultViewMode}`}>
+          {vaultViewMode === "list" ? (
+            <table className="file-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Size</th>
+                  <th>Added</th>
+                  <th><span className="visually-hidden">Actions</span></th>
                 </tr>
+              </thead>
+              <tbody>
+                {folders.map((folder) => (
+                  <tr key={`folder-${folder.id}`}>
+                    <td>
+                      <button className="folder-name-button" type="button" onClick={() => openFolder(folder)}>
+                        <div className="file-visual file-visual-list folder-visual">
+                          <Folder size={20} />
+                        </div>
+                        <div>
+                          <strong>{folder.name ?? "Unreadable encrypted folder"}</strong>
+                          <span>Folder</span>
+                        </div>
+                      </button>
+                    </td>
+                    <td>Folder</td>
+                    <td>{formatDate(folder.created_at)}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="icon-button" title="Open folder" aria-label={`Open ${folder.name ?? "folder"}`} onClick={() => openFolder(folder)} disabled={fileBusy || !folder.name}>
+                          <FolderOpen size={18} />
+                        </button>
+                        <button type="button" className="icon-button danger" title="Delete folder" aria-label={`Delete ${folder.name ?? "folder"}`} onClick={() => void handleDeleteFolder(folder)} disabled={fileBusy}>
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {files.map((file) => (
+                  <tr key={`file-${file.id}`}>
+                    <td>
+                      <div className="file-name-cell">
+                        <FileVisual file={file} session={session} viewMode="list" />
+                        <div>
+                          <strong>{file.manifest?.name ?? "Unreadable encrypted file"}</strong>
+                          <span>{getFileTypeLabel(file)}</span>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{formatBytes(file.encryption_metadata?.plaintext_size ?? 0)}</td>
+                    <td>{formatDate(file.created_at)}</td>
+                    <td>
+                      <div className="row-actions">
+                        <button type="button" className="icon-button" title="Preview image" aria-label={`Preview ${file.manifest?.name ?? "file"}`} onClick={() => openImagePreview(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata || !isImageFile(file)}>
+                          <Eye size={18} />
+                        </button>
+                        <button type="button" className="icon-button" title="Download and decrypt" aria-label={`Download ${file.manifest?.name ?? "file"}`} onClick={() => void handleDownload(file)} disabled={fileBusy || !file.manifest}>
+                          <Download size={18} />
+                        </button>
+                        <button type="button" className="icon-button" title="Share securely" aria-label={`Share ${file.manifest?.name ?? "file"}`} onClick={() => void openShareDialog(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata}>
+                          <Share2 size={18} />
+                        </button>
+                        <button type="button" className="icon-button" title="Copy file" aria-label={`Copy ${file.manifest?.name ?? "file"}`} onClick={() => handleCopyFile(file)} disabled={fileBusy || !file.manifest}>
+                          <Copy size={18} />
+                        </button>
+                        <button type="button" className="icon-button" title="Move file" aria-label={`Move ${file.manifest?.name ?? "file"}`} onClick={() => handleMoveFile(file)} disabled={fileBusy || !file.manifest}>
+                          <Scissors size={18} />
+                        </button>
+                        <button type="button" className="icon-button danger" title="Delete" aria-label={`Delete ${file.manifest?.name ?? "file"}`} onClick={() => void handleDelete(file)} disabled={fileBusy}>
+                          <Trash2 size={18} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="vault-grid">
+              {folders.map((folder) => (
+                <div className="vault-card" key={`folder-${folder.id}`}>
+                  <button className="vault-card-main" type="button" onClick={() => openFolder(folder)} disabled={fileBusy || !folder.name}>
+                    <div className={`file-visual file-visual-${vaultViewMode} folder-visual`}>
+                      <Folder size={fileVisualIconSize(vaultViewMode)} />
+                    </div>
+                    <strong>{folder.name ?? "Unreadable encrypted folder"}</strong>
+                    <span>Folder</span>
+                  </button>
+                  <div className="row-actions card-actions">
+                    <button type="button" className="icon-button" title="Open folder" aria-label={`Open ${folder.name ?? "folder"}`} onClick={() => openFolder(folder)} disabled={fileBusy || !folder.name}>
+                      <FolderOpen size={18} />
+                    </button>
+                    <button type="button" className="icon-button danger" title="Delete folder" aria-label={`Delete ${folder.name ?? "folder"}`} onClick={() => void handleDeleteFolder(folder)} disabled={fileBusy}>
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
               ))}
               {files.map((file) => (
-                <tr key={`file-${file.id}`}>
-                  <td>
-                    <div className="file-name-cell">
-                      <FileLock2 size={20} />
-                      <div>
-                        <strong>{file.manifest?.name ?? "Unreadable encrypted file"}</strong>
-                        <span>{file.manifest?.type ?? "Authentication failed"}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>{formatBytes(file.encryption_metadata?.plaintext_size ?? 0)}</td>
-                  <td>{formatDate(file.created_at)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button type="button" className="icon-button" title="Download and decrypt" aria-label={`Download ${file.manifest?.name ?? "file"}`} onClick={() => void handleDownload(file)} disabled={fileBusy || !file.manifest}>
-                        <Download size={18} />
-                      </button>
-                      <button type="button" className="icon-button" title="Share securely" aria-label={`Share ${file.manifest?.name ?? "file"}`} onClick={() => void openShareDialog(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata}>
-                        <Share2 size={18} />
-                      </button>
-                      <button type="button" className="icon-button" title="Copy file" aria-label={`Copy ${file.manifest?.name ?? "file"}`} onClick={() => handleCopyFile(file)} disabled={fileBusy || !file.manifest}>
-                        <Copy size={18} />
-                      </button>
-                      <button type="button" className="icon-button" title="Move file" aria-label={`Move ${file.manifest?.name ?? "file"}`} onClick={() => handleMoveFile(file)} disabled={fileBusy || !file.manifest}>
-                        <Scissors size={18} />
-                      </button>
-                      <button type="button" className="icon-button danger" title="Delete" aria-label={`Delete ${file.manifest?.name ?? "file"}`} onClick={() => void handleDelete(file)} disabled={fileBusy}>
-                        <Trash2 size={18} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+                <div className="vault-card" key={`file-${file.id}`}>
+                  <button className="vault-card-main" type="button" onClick={() => openImagePreview(file)} disabled={!file.manifest || !file.encryption_metadata || !isImageFile(file)}>
+                    <FileVisual file={file} session={session} viewMode={vaultViewMode} />
+                    <strong>{file.manifest?.name ?? "Unreadable encrypted file"}</strong>
+                    <span>{getFileTypeLabel(file)}</span>
+                  </button>
+                  <div className="row-actions card-actions">
+                    <button type="button" className="icon-button" title="Preview image" aria-label={`Preview ${file.manifest?.name ?? "file"}`} onClick={() => openImagePreview(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata || !isImageFile(file)}>
+                      <Eye size={18} />
+                    </button>
+                    <button type="button" className="icon-button" title="Download and decrypt" aria-label={`Download ${file.manifest?.name ?? "file"}`} onClick={() => void handleDownload(file)} disabled={fileBusy || !file.manifest}>
+                      <Download size={18} />
+                    </button>
+                    <button type="button" className="icon-button" title="Share securely" aria-label={`Share ${file.manifest?.name ?? "file"}`} onClick={() => void openShareDialog(file)} disabled={fileBusy || !file.manifest || !file.encryption_metadata}>
+                      <Share2 size={18} />
+                    </button>
+                    <button type="button" className="icon-button" title="Copy file" aria-label={`Copy ${file.manifest?.name ?? "file"}`} onClick={() => handleCopyFile(file)} disabled={fileBusy || !file.manifest}>
+                      <Copy size={18} />
+                    </button>
+                    <button type="button" className="icon-button" title="Move file" aria-label={`Move ${file.manifest?.name ?? "file"}`} onClick={() => handleMoveFile(file)} disabled={fileBusy || !file.manifest}>
+                      <Scissors size={18} />
+                    </button>
+                    <button type="button" className="icon-button danger" title="Delete" aria-label={`Delete ${file.manifest?.name ?? "file"}`} onClick={() => void handleDelete(file)} disabled={fileBusy}>
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          )}
 
           {!loadingFiles && totalVisibleItems === 0 && (
             <div className="empty-state">
@@ -2163,6 +2370,14 @@ function VaultApp() {
             {notice && <NoticeBanner notice={notice} />}
           </section>
         </div>
+      )}
+
+      {previewFile && (
+        <ImagePreviewModal
+          file={previewFile}
+          session={session}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
 
       {securityOpen && (
@@ -2363,6 +2578,233 @@ function VaultApp() {
         <span><ShieldCheck size={15} /> Protocol v1</span>
       </footer>
     </main>
+  );
+}
+
+
+function fileVisualIconSize(viewMode: VaultViewMode): number {
+  if (viewMode === "large") return 48;
+  if (viewMode === "medium") return 36;
+  if (viewMode === "small") return 26;
+  return 20;
+}
+
+
+function FileVisual({
+  file,
+  session,
+  viewMode
+}: {
+  file: DisplayFile;
+  session: Session;
+  viewMode: VaultViewMode;
+}) {
+  const iconSize = fileVisualIconSize(viewMode);
+
+  if (file.encryption_metadata && isImageFile(file)) {
+    return (
+      <ImageThumbnail
+        file={file}
+        session={session}
+        viewMode={viewMode}
+      />
+    );
+  }
+
+  return (
+    <div className={`file-visual file-visual-${viewMode}`}>
+      {renderFileTypeIcon(file, iconSize)}
+    </div>
+  );
+}
+
+
+function ImageThumbnail({
+  file,
+  session,
+  viewMode
+}: {
+  file: DisplayFile;
+  session: Session;
+  viewMode: VaultViewMode;
+}) {
+  const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!file.encryption_metadata) return;
+
+    let active = true;
+    let objectUrl: string | null = null;
+
+    async function loadThumbnail() {
+      try {
+        const ciphertext = await downloadEncryptedFile(session.token, file.id);
+        const decrypted = await decryptFileInWorker(
+          ciphertext,
+          file.encrypted_filename,
+          file.encryption_metadata!,
+          session.vaultKey
+        );
+        const nextUrl = URL.createObjectURL(decrypted.content);
+
+        if (!active) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+
+        objectUrl = nextUrl;
+        setThumbnailUrl(nextUrl);
+      } catch {
+        if (active) {
+          setFailed(true);
+        }
+      }
+    }
+
+    void loadThumbnail();
+
+    return () => {
+      active = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [
+    file.encrypted_filename,
+    file.encryption_metadata,
+    file.id,
+    session.token,
+    session.vaultKey
+  ]);
+
+  return (
+    <div className={`file-visual file-visual-${viewMode} image-visual`}>
+      {thumbnailUrl ? (
+        <img src={thumbnailUrl} alt="" loading="lazy" />
+      ) : failed ? (
+        <FileImage size={fileVisualIconSize(viewMode)} />
+      ) : (
+        <LoaderCircle className="spin" size={18} />
+      )}
+    </div>
+  );
+}
+
+
+function ImagePreviewModal({
+  file,
+  session,
+  onClose
+}: {
+  file: DisplayFile;
+  session: Session;
+  onClose: () => void;
+}) {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const name = file.manifest?.name ?? "Encrypted image";
+
+  useEffect(() => {
+    if (!file.encryption_metadata) {
+      setBusy(false);
+      setError("Image metadata is unavailable");
+      return;
+    }
+
+    let active = true;
+    let objectUrl: string | null = null;
+
+    async function loadPreview() {
+      setBusy(true);
+      setError(null);
+
+      try {
+        const ciphertext = await downloadEncryptedFile(session.token, file.id);
+        const decrypted = await decryptFileInWorker(
+          ciphertext,
+          file.encrypted_filename,
+          file.encryption_metadata!,
+          session.vaultKey
+        );
+        const nextUrl = URL.createObjectURL(decrypted.content);
+
+        if (!active) {
+          URL.revokeObjectURL(nextUrl);
+          return;
+        }
+
+        objectUrl = nextUrl;
+        setPreviewUrl(nextUrl);
+      } catch (loadError) {
+        if (active) {
+          setError(getErrorMessage(loadError));
+        }
+      } finally {
+        if (active) {
+          setBusy(false);
+        }
+      }
+    }
+
+    void loadPreview();
+
+    return () => {
+      active = false;
+
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [
+    file.encrypted_filename,
+    file.encryption_metadata,
+    file.id,
+    session.token,
+    session.vaultKey
+  ]);
+
+  return (
+    <div className="modal-backdrop image-preview-backdrop" role="presentation">
+      <section className="modal-panel image-preview-panel" role="dialog" aria-modal="true" aria-labelledby="image-preview-title">
+        <div className="modal-header">
+          <div>
+            <h2 id="image-preview-title">{name}</h2>
+            <p>{getFileTypeLabel(file)}</p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose} title="Close" aria-label="Close preview">
+            <X size={19} />
+          </button>
+        </div>
+
+        <div className="image-preview-stage">
+          {busy ? (
+            <div className="image-preview-state">
+              <LoaderCircle className="spin" size={26} />
+              <span>Decrypting preview</span>
+            </div>
+          ) : error ? (
+            <div className="image-preview-state error-state">
+              <AlertCircle size={26} />
+              <span>{error}</span>
+            </div>
+          ) : previewUrl ? (
+            <img src={previewUrl} alt={name} />
+          ) : null}
+        </div>
+
+        {previewUrl && (
+          <div className="image-preview-actions">
+            <a className="secondary-button" href={previewUrl} download={name}>
+              <Download size={17} />
+              Download
+            </a>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }
 
