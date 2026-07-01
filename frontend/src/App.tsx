@@ -7,6 +7,7 @@ import {
   Copy,
   Download,
   Eye,
+  EyeOff,
   File as FileIcon,
   FileArchive,
   FileCode,
@@ -146,6 +147,7 @@ const LEGACY_FILES_PATH = "/files";
 const MANUAL_LOCK_STORAGE_KEY = "prototype:manual-vault-lock";
 const LEGACY_MANUAL_LOCK_STORAGE_KEY = "prototype:manual-file-lock";
 const VAULT_VIEW_MODE_STORAGE_KEY = "prototype:vault-view-mode";
+const VAULT_THUMBNAILS_HIDDEN_STORAGE_KEY = "prototype:vault-thumbnails-hidden";
 
 
 function formatBytes(bytes: number): string {
@@ -228,6 +230,15 @@ function getStoredVaultViewMode(): VaultViewMode {
     || stored === "large"
     || stored === "list"
   ) ? stored : "list";
+}
+
+
+function getStoredVaultThumbnailsHidden(): boolean {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+
+  return localStorage.getItem(VAULT_THUMBNAILS_HIDDEN_STORAGE_KEY) === "1";
 }
 
 
@@ -448,6 +459,9 @@ function VaultApp() {
   const [vaultViewMode, setVaultViewMode] = useState<VaultViewMode>(
     getStoredVaultViewMode
   );
+  const [thumbnailsHidden, setThumbnailsHidden] = useState(
+    getStoredVaultThumbnailsHidden
+  );
   const [previewFile, setPreviewFile] = useState<DisplayFile | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
@@ -539,6 +553,13 @@ function VaultApp() {
   useEffect(() => {
     localStorage.setItem(VAULT_VIEW_MODE_STORAGE_KEY, vaultViewMode);
   }, [vaultViewMode]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      VAULT_THUMBNAILS_HIDDEN_STORAGE_KEY,
+      thumbnailsHidden ? "1" : "0"
+    );
+  }, [thumbnailsHidden]);
 
   useEffect(() => {
     if (!pendingRegistration || pendingRegistration.resendAfterSeconds <= 0) {
@@ -2108,6 +2129,16 @@ function VaultApp() {
                 <Grid3x3 size={21} />
               </button>
             </div>
+            <button
+              className={`secondary-button compact thumbnail-toggle${thumbnailsHidden ? " active" : ""}`}
+              type="button"
+              aria-pressed={thumbnailsHidden}
+              title={thumbnailsHidden ? "Show image thumbnails" : "Hide image thumbnails"}
+              onClick={() => setThumbnailsHidden((current) => !current)}
+            >
+              {thumbnailsHidden ? <Eye size={18} /> : <EyeOff size={18} />}
+              {thumbnailsHidden ? "Show thumbnails" : "Hide thumbnails"}
+            </button>
             {fileClipboard && (
               <button
                 className="secondary-button compact"
@@ -2234,7 +2265,12 @@ function VaultApp() {
                   <tr key={`file-${file.id}`}>
                     <td>
                       <div className="file-name-cell">
-                        <FileVisual file={file} session={session} viewMode="list" />
+                        <FileVisual
+                          file={file}
+                          session={session}
+                          thumbnailsHidden={thumbnailsHidden}
+                          viewMode="list"
+                        />
                         <div>
                           <strong>{file.manifest?.name ?? "Unreadable encrypted file"}</strong>
                           <span>{getFileTypeLabel(file)}</span>
@@ -2293,7 +2329,12 @@ function VaultApp() {
               {files.map((file) => (
                 <div className="vault-card" key={`file-${file.id}`}>
                   <button className="vault-card-main" type="button" onClick={() => openImagePreview(file)} disabled={!file.manifest || !file.encryption_metadata || !isImageFile(file)}>
-                    <FileVisual file={file} session={session} viewMode={vaultViewMode} />
+                    <FileVisual
+                      file={file}
+                      session={session}
+                      thumbnailsHidden={thumbnailsHidden}
+                      viewMode={vaultViewMode}
+                    />
                     <strong>{file.manifest?.name ?? "Unreadable encrypted file"}</strong>
                     <span>{getFileTypeLabel(file)}</span>
                   </button>
@@ -2593,15 +2634,17 @@ function fileVisualIconSize(viewMode: VaultViewMode): number {
 function FileVisual({
   file,
   session,
+  thumbnailsHidden,
   viewMode
 }: {
   file: DisplayFile;
   session: Session;
+  thumbnailsHidden: boolean;
   viewMode: VaultViewMode;
 }) {
   const iconSize = fileVisualIconSize(viewMode);
 
-  if (file.encryption_metadata && isImageFile(file)) {
+  if (file.encryption_metadata && isImageFile(file) && !thumbnailsHidden) {
     return (
       <ImageThumbnail
         file={file}

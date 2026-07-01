@@ -949,6 +949,12 @@ button:disabled {
   background: #eaf5f3;
 }
 
+.thumbnail-toggle.active {
+  border-color: #8ab9b4;
+  color: #0f766e;
+  background: #eaf5f3;
+}
+
 .vault-breadcrumb {
   min-height: 38px;
   margin: -4px 0 16px;
